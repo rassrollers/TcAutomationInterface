@@ -1,0 +1,47 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.10.35201.131
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutomationInterface.testConsole", "AutomationInterface.testConsole\AutomationInterface.testConsole.csproj", "{1A7F8B74-6923-4437-AE4B-652F16934D5E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutomationInterface.core", "AutomationInterface.core\AutomationInterface.core.csproj", "{CD5A4237-7D23-480C-AE96-25FD5E4883A1}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}"
+	ProjectSection(SolutionItems) = preProject
+		.gitignore = .gitignore
+		README.md = README.md
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Debug|x64 = Debug|x64
+		Release|Any CPU = Release|Any CPU
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1A7F8B74-6923-4437-AE4B-652F16934D5E}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{1A7F8B74-6923-4437-AE4B-652F16934D5E}.Debug|Any CPU.Build.0 = Debug|x64
+		{1A7F8B74-6923-4437-AE4B-652F16934D5E}.Debug|x64.ActiveCfg = Debug|x64
+		{1A7F8B74-6923-4437-AE4B-652F16934D5E}.Debug|x64.Build.0 = Debug|x64
+		{1A7F8B74-6923-4437-AE4B-652F16934D5E}.Release|Any CPU.ActiveCfg = Release|x64
+		{1A7F8B74-6923-4437-AE4B-652F16934D5E}.Release|Any CPU.Build.0 = Release|x64
+		{1A7F8B74-6923-4437-AE4B-652F16934D5E}.Release|x64.ActiveCfg = Release|x64
+		{1A7F8B74-6923-4437-AE4B-652F16934D5E}.Release|x64.Build.0 = Release|x64
+		{CD5A4237-7D23-480C-AE96-25FD5E4883A1}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{CD5A4237-7D23-480C-AE96-25FD5E4883A1}.Debug|Any CPU.Build.0 = Debug|x64
+		{CD5A4237-7D23-480C-AE96-25FD5E4883A1}.Debug|x64.ActiveCfg = Debug|x64
+		{CD5A4237-7D23-480C-AE96-25FD5E4883A1}.Debug|x64.Build.0 = Debug|x64
+		{CD5A4237-7D23-480C-AE96-25FD5E4883A1}.Release|Any CPU.ActiveCfg = Release|x64
+		{CD5A4237-7D23-480C-AE96-25FD5E4883A1}.Release|Any CPU.Build.0 = Release|x64
+		{CD5A4237-7D23-480C-AE96-25FD5E4883A1}.Release|x64.ActiveCfg = Release|x64
+		{CD5A4237-7D23-480C-AE96-25FD5E4883A1}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {29F339CB-D543-4372-88DE-FD67921BBD78}
+	EndGlobalSection
+EndGlobal

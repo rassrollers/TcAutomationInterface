@@ -150,6 +150,7 @@ try
     await env.CreateProgramItem("ITFs", ProgramItemsTypes.Folder.ToString(), "");
     await env.CreateProgramItem("TestInterface", ProgramItemsTypes.Interface.ToString(), "ITFs");
 
+    env.InjectGitVersion("1.0.0", "34fds34", "2024-06-05T12:34:56Z");
 
     Console.WriteLine("Done!");
     Console.ReadLine();

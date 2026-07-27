@@ -108,8 +108,38 @@ public partial class AutomationInterface : IDisposable
     }
     #endregion
 
-    #region Retry logic
+    #region Retry logic'
+    /// <summary>
+    /// COM error code indicating that a child item was not found in the TwinCAT system manager tree.
+    /// </summary>
+    private const int CHILD_NOT_FOUND = unchecked((int)0x98510001);
+
+    /// <summary>
+    /// COM error code indicating the server is busy and the call should be retried.
+    /// This is a transient condition, not a fatal error.
+    /// </summary>
+    private const int RPC_E_SERVERCALL_RETRYLATER = unchecked((int)0x8001010A);
+
+    /// <summary>
+    /// COM error code indicating the call was rejected by the message filter.
+    /// This is a transient condition, not a fatal error.
+    /// </summary>
+    private const int RPC_E_CALL_REJECTED = unchecked((int)0x80010001);
+
     private delegate void RetryAction();
+
+    /// <summary>
+    /// Determines whether a <see cref="COMException"/> represents a transient rejection
+    /// that should be retried (busy state), rather than a fatal error.
+    /// </summary>
+    /// <param name="ex">The COM exception to evaluate.</param>
+    /// <returns><see langword="true"/> if the call should be retried; otherwise <see langword="false"/>.</returns>
+    private static bool IsRetryable(COMException ex)
+    {
+        int hr = ex.HResult;
+        return hr == RPC_E_SERVERCALL_RETRYLATER ||
+               hr == RPC_E_CALL_REJECTED;
+    }
 
     /// <summary>
     /// Retries a COM action up to <paramref name="maxRetries"/> times with a delay between attempts.
@@ -132,40 +162,28 @@ public partial class AutomationInterface : IDisposable
                 action();
                 return; // Success
             }
-            catch (COMException ex)
+            catch (COMException ex) when (IsRetryable(ex))
             {
-                lastException = ex;
-                uint hresult = (uint)ex.HResult;
-                if (hresult == 0x8001010A)
-                {
-                    attempt++;
-                    log.LogDebug("[AutomationInterface] Failed to execute action: {action} due to RPC_E_SERVERCALL_RETRYLATER, retrying {attempt}/{maxRetries}", 
-                        actionName, attempt, maxRetries);
-                    if (attempt >= maxRetries)
-                        throw;
-                    Thread.Sleep(delayMilliseconds);
-                }
-                else
-                {
-                    string? errorName = Enum.GetName(typeof(TCSYSMANAGERHRESULTS), ex.HResult);
-                    if (errorName != null)
-                        log.LogError("[AutomationInterface] COM Exception occurred: {error} (0x{HResult:X}) - {message}", 
-                            errorName, ex.HResult, ex.Message);
-                    else
-                        log.LogError("[AutomationInterface] Unknown COM Exception: 0x{HResult:X} - {message}", 
-                            ex.HResult, ex.Message);
-                    throw;
-                }
-            }
-            catch (MissingMemberException ex) when (ex.Message.Contains("0x8001010A"))
-            {
-                lastException = ex;
                 attempt++;
-                log.LogDebug("[AutomationInterface] Dynamic COM member busy: {action}, retry {attempt}/{maxRetries}",
-                    actionName, attempt, maxRetries);
+                log.LogDebug("[AutomationInterface] Failed to execute action: {action} due to {error}, retrying {attempt}/{maxRetries}",
+                    actionName, ex.Message, attempt, maxRetries);
                 if (attempt >= maxRetries)
                     throw;
                 Thread.Sleep(delayMilliseconds);
+            }
+            catch (Exception ex)
+            {
+                string? errorName = Enum.GetName(typeof(TCSYSMANAGERHRESULTS), ex.HResult);
+                if (ex.HResult == CHILD_NOT_FOUND)
+                    log.LogDebug("[AutomationInterface] Child item not found during action: {action} - {message}", 
+                        actionName, ex.Message);
+                else if (errorName != null)
+                    log.LogError("[AutomationInterface] COM Exception occurred: {error} (0x{HResult:X}) - {message}", 
+                        errorName, ex.HResult, ex.Message);
+                else
+                    log.LogError("[AutomationInterface] Unknown COM Exception: 0x{HResult:X} - {message}", 
+                        ex.HResult, ex.Message);
+                throw;
             }
         }
         

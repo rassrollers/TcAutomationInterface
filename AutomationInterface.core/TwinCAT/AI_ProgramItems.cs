@@ -1,4 +1,6 @@
-﻿using TCatSysManagerLib;
+﻿using Microsoft.Extensions.Logging;
+using System.Runtime.InteropServices;
+using TCatSysManagerLib;
 
 namespace AutomationInterface.core;
 
@@ -25,15 +27,43 @@ public partial class AutomationInterface
         var vInfo = GenerateVInfoOptions(type, returnType);
 
         ITcSmTreeItem programItem;
-        if (!string.IsNullOrEmpty(itemPath))
-            programItem = plcIecProjectTreeItem.LookupChild(itemPath);
-        else
-            programItem = plcIecProjectTreeItem;
+        Retry(() =>
+        {
+            if (!string.IsNullOrEmpty(itemPath))
+                programItem = plcIecProjectTreeItem.LookupChild(itemPath);
+            else
+                programItem = plcIecProjectTreeItem;
 
-        if (vInfo.Count > 0)
-            programItem.CreateChild(itemName, (int)type, "", vInfo.ToArray());
-        else
-            programItem.CreateChild(itemName, (int)type, "", null); // Parse null if no optionals
+            if (vInfo.Count > 0)
+                programItem.CreateChild(itemName, (int)type, "", vInfo.ToArray());
+            else
+                programItem.CreateChild(itemName, (int)type, "", null); // Parse null if no optionals
+        }, actionName: "CreateProgramItem");
+    }
+
+    /// <summary>
+    /// Validates that a PLC program-item path resolves to an existing child item in the current IEC project tree.
+    /// </summary>
+    /// <param name="itemPath">The relative tree path to validate.</param>
+    /// <returns><see langword="true"/> when the path resolves to an existing program item; otherwise <see langword="false"/>.</returns>
+    /// <exception cref="AutomationInterfaceException">Thrown when the PLC project tree reference has not been initialized.</exception>
+    internal bool ValidateProgramItemPath(string itemPath)
+    {
+        if (plcIecProjectTreeItem is null)
+            throw new AutomationInterfaceException("PLC items tree item reference was not set");
+        try
+        {
+            ITcSmTreeItem? programItem = null;
+            Retry(() =>
+            {
+                programItem = plcIecProjectTreeItem.LookupChild(itemPath);
+            }, actionName: "ValidateProgramItemPath");
+            return programItem != null;
+        }
+        catch (COMException ex) when (ex.HResult == CHILD_NOT_FOUND)
+        {
+            return false;
+        }
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using TCatSysManagerLib;
@@ -11,6 +12,14 @@ namespace AutomationInterface.core;
 public partial class AutomationInterface
 {
     #region Project references
+    private const string VERSION_INFO_DEFAULT = "TYPE VERSION_INFO:\nSTRUCT\n" +
+        "\t\tMAJOR: UINT := 0;\n" +
+        "\t\tMINOR: UINT := 0;\n" +
+        "\t\tBUILD: UINT := 0;\n" +
+        "\t\tREVISION: UINT := 0;\n" +
+        "\t\tCOMMIT_HASH: STRING := \"\";\n" +
+        "\t\tCOMMIT_TIME: STRING := \"\";\n" +
+        "END_STRUCT\nEND_TYPE";
     // PLC project references
     private ITcPlcProject? plcProject = null;
     private ITcSmTreeItem? plcProjectTreeItem = null;
@@ -166,30 +175,49 @@ public partial class AutomationInterface
     #endregion
 
     /// <summary>
-    /// Updates the <c>VERSION_INFO</c> POU in the PLC project with Git version data.
-    /// Injects major, minor, build, revision, commit hash, commit time, build time, and version string.
+    /// Updates the <c>VERSION_INFO</c> POU in the PLC project with explicit version metadata.
+    /// Injects major, minor, build, revision, commit hash, commit time and build time.
     /// </summary>
-    /// <param name="gitInfo">The Git information to inject into the version file.</param>
+    /// <param name="version">Version in <c>major.minor.build.revision</c> format (for example <c>1.0.0.0</c>).</param>
+    /// <param name="commitHash">Commit hash to inject.</param>
+    /// <param name="commitTime">Commit timestamp to inject.</param>
     /// <exception cref="AutomationInterfaceException">
     /// Thrown when one or more keys could not be matched in the version file declarations.
     /// </exception>
-    internal void UpdateVersionFile(IGitInfo gitInfo)
+    internal void UpdateVersionFile(string version, string commitHash, string commitTime)
     {
+        if (string.IsNullOrWhiteSpace(version))
+            throw new ArgumentException("Version cannot be null or empty", nameof(version));
+        if (string.IsNullOrWhiteSpace(commitHash))
+            throw new ArgumentException("Commit hash cannot be null or empty", nameof(commitHash));
+        if (string.IsNullOrWhiteSpace(commitTime))
+            throw new ArgumentException("Commit time cannot be null or empty", nameof(commitTime));
+
+        Version parsedVersion = Version.Parse(version);
+        int major = parsedVersion.Major;
+        int minor = parsedVersion.Minor;
+        int build = parsedVersion.Build >= 0 ? parsedVersion.Build : 0;
+        int revision = parsedVersion.Revision >= 0 ? parsedVersion.Revision : 0;
+
+        if (!ValidateProgramItemPath("Version"))
+            CreateProgramItem("Version", ProgramItemsTypes.Folder.ToString());
+
+        if (!ValidateProgramItemPath("Version^VERSION_INFO"))
+            CreateProgramItem("VERSION_INFO", ProgramItemsTypes.Struct.ToString(), "Version");
+
         ITcPlcDeclaration versionDecl = ExtractPlcDeclaration("Version^VERSION_INFO");
         string declarationString = versionDecl.DeclarationText;
-        log.LogDebug("Version file before inject:\n{declaration}", declarationString);
+        declarationString = VERSION_INFO_DEFAULT;
+        log.LogDebug("Version file before inject (escaped): {declaration}", declarationString);
 
-        string currentTime = DateTimeOffset.Now.ToString("o");
         Dictionary<string, string> injectData = new()
         {
-            { "MAJOR", gitInfo.GetMajor().ToString()! },
-            { "MINOR", gitInfo.GetMinor().ToString()! },
-            { "BUILD", gitInfo.GetBuild().ToString()! },
-            { "REVISION", gitInfo.GetRevision().ToString()! },
-            { "COMMIT_HASH", $"\'{gitInfo.GetCommitHash()}\'" },
-            { "COMMIT_TIME", $"\'{gitInfo.GetCommitTime()}\'" },
-            { "BUILD_TIME", $"\'{currentTime}\'" },
-            { "VERSION_STRING", $"\'{gitInfo.GetLongVersion()}\'" }
+            { "MAJOR", major.ToString() },
+            { "MINOR", minor.ToString() },
+            { "BUILD", build.ToString() },
+            { "REVISION", revision.ToString() },
+            { "COMMIT_HASH", $"\'{commitHash}\'" },
+            { "COMMIT_TIME", $"\'{commitTime}\'" },
         };
 
         StringBuilder stringBuilder = DictInjectToXmlString(declarationString, injectData);
@@ -216,26 +244,26 @@ public partial class AutomationInterface
     /// marks the library as released, and exports it to the specified output directory.
     /// </summary>
     /// <param name="outputDir">The directory to save the library file to.</param>
-    /// <param name="shortGitVersion">The Git information used for versioning.</param>
+    /// <param name="version">The Git information used for versioning.</param>
     /// <exception cref="AutomationInterfaceException">Thrown when the library is already marked as released.</exception>
-    public async Task SaveLibraryFile(string outputDir, string shortGitVersion)
+    public async Task SaveLibraryFile(string outputDir, string version)
     {
         PlcProjectXml projectXml = ExtractPlcProjectXml();
         if (projectXml!.GetTcLibReleased())
             throw new AutomationInterfaceException("Library is already in released setting! Unable to edit!");
 
-        projectXml.SetTcLibVersion(shortGitVersion).SetTcLibReleased(true);
+        projectXml.SetTcLibVersion(version).SetTcLibReleased(true);
 
         // Save the changes to the XML
         log.LogInformation("Saving project information changes");
         Retry(() =>
         {
             plcIecProjectTreeItem!.ConsumeXml(projectXml.ToXmlString());
-        }, actionName: "ProjectXmlConsume", maxRetries: 5, delayMilliseconds: 1000);
+        }, actionName: "ProjectXmlConsume");
 
         await vsEnv.SaveAll();
 
-        SaveAsLibrary(outputDir, shortGitVersion, projectXml);
+        SaveAsLibrary(outputDir, version, projectXml);
     }
 
     /// <summary>

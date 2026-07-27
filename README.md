@@ -1,10 +1,10 @@
 ﻿# TwinCAT Automation Interface
 
-Implementation of the TwinCAT Automation Interface core asa library.
+Implementation of the TwinCAT Automation Interface core as a library.
 
 Can be used for e.g. build server to interact with TwinCAT IDE or automated deployment.
 
-This works for TwinCAT 3.1.4024 and .4026.
+This works for TwinCAT 3.1.4024 and 3.1.4026.
 
 ## Project Structure
 
@@ -21,9 +21,9 @@ The architecture of the project is structured as follows:
 
 AutomationInterface.core:
 * Environment/
-    * IVisualStudioEnvironment    - Interface for VS DTE operations
-    * VisualStudioEnvironment     - COM-based DTE wrapper with retry logic
     * TcXaeShellEnvironment       - High-level orchestrator for TwinCAT operations
+    * VisualStudioEnvironment     - COM-based DTE wrapper with retry logic
+    * DteHelper, IOleMessageFilter, MessageFilter, StaComHost, ErrorItemsEnumerable - COM and STA threading helpers for DTE access
 * TwinCAT/
     * AutomationInterface (partial class)
         * AI_Base                 - System manager, configuration, and runtime control
@@ -31,23 +31,23 @@ AutomationInterface.core:
         * AI_Motion               - NC/Motion axis reload via Solution Explorer
         * AI_PlcProject           - PLC project references, version injection, library export
         * AI_ProgramItems         - Program item management (POU, DUT, GVL, etc.)
-        * AI_System 			  - System setup (License, Task, etc.)
-        * AI_Template             - Templates for solution and projects
+        * AI_System               - System setup (License, Task, etc.)
+        * AI_Templates            - Templates for solution and projects
     * TcProjectXml                - .tsproj XML manipulation (version, variants, licenses)
     * PlcProjectXml               - .plcproj XML manipulation (version, release state, TcUnit)
     * TcUnitRunner                - TcUnit test result polling and reporting
     * BuildOptions                - CLI argument definitions
-    * AI_Settings                 - Constants for tree item paths and DTE object names
+    * AI_Settings                 - AutomationInterfaceSettings, TreeItems, and enum definitions
+* ADS/
+    * AdsHandler                  - ADS connection and TwinCAT runtime state control
 * Git/
     * IGitInfo                    - Interface for Git version data
     * GitInfo                     - LibGit2Sharp-based Git version extraction
 * Exceptions/
-    * TwinCatException            - TwinCAT environment errors
-    * AutomationInterfaceException - Automation Interface layer errors
-    * TcXmlException              - XML parsing errors
-    * WrongOSException            - Non-Windows OS detection
-* AppTools                         - Configuration, logging, and OS utilities
-* FilesAndPathTools                - File and directory search helpers
+    * TwinCatException.cs         - TwinCatException, AutomationInterfaceException, TcXmlException
+    * WrongOSException.cs         - Non-Windows OS detection
+* AppTools                        - Configuration, logging, and OS utilities
+* FilesAndPathTools               - File and directory search helpers
 
 ## Requirements
 
@@ -64,7 +64,7 @@ Use the `Example.cs` and `appsettings.json` in the `Example` directory as a temp
 | Option | Short | Required | Description |
 |--------|-------|----------|-------------|
 | `--SolutionName` | `-s` | No | Solution filename to locate in the working directory |
-| `--WorkDir` | `-w` | No | Root directory containing the `.git` folder |
+| `--WorkDir` | `-w` | Yes | Root directory containing the `.git` folder |
 | `--Type` | `-t` | No | Build type: `Library` or `Project` |
 | `--UiXae` | `-u` | No | Show the TcXaeShell UI (default: `false`) |
 | `--UserControl` | `-c` | No | Enable user control of the UI (default: `false`) |
@@ -81,7 +81,7 @@ Application settings are defined in `appsettings.json`:
 
 ## Using as a Git Submodule
 
-This repository can be added as a Git submodule to other projects, allowing you to reference `AutomationInterface.core` directly.
+This repository can used as a Git submodule to other projects, allowing you to reference `AutomationInterface.core` directly.
 
 > **Note:** Only the `AutomationInterface.core` project is intended for use as a library. The `AutomationInterface.testConsole` project is a test harness and should not be referenced by consuming projects.
 

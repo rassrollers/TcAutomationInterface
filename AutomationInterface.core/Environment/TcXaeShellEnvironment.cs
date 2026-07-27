@@ -290,23 +290,26 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     #region Project configuration
     /// <summary>
     /// Inject the licenses necessary for running the build server.
-    /// Adds the licenses defined in the appsettings.json.
+    /// Adds the provided license values to the TwinCAT project.
     /// PrepareEnvironment must be called before!
     /// Must be called before opening the environment.
     /// </summary>
-    public async Task InjectBuildLicenses(string projectPath, IConfiguration config)
+    /// <param name="projectPath">Path to the TwinCAT project file.</param>
+    /// <param name="licenses">Collection of license key/value pairs where the value is the license string.</param>
+    public async Task InjectBuildLicenses(string projectPath, IEnumerable<KeyValuePair<string, string?>> licenses)
     {
         if (tcState >= TcEnvironmenState.SolutionOpened)
             throw new TwinCatException("Cannot inject build licenses because the solution is already opened");
+
+        ArgumentNullException.ThrowIfNull(licenses);
 
         await SelectProjectInSolution(projectPath);
         if (tcProjectXml is null)
             throw new TwinCatException("Unable to inject build licenses because tcProjectXml was not set");
 
-        var licensesSection = config.GetSection("Licenses");
-        foreach (var license in licensesSection.GetChildren())
+        foreach (var license in licenses)
         {
-            if (!string.IsNullOrEmpty(license.Value))
+            if (!string.IsNullOrWhiteSpace(license.Value))
             {
                 log.LogInformation("Adding license: {key} {value}", license.Key, license.Value);
                 tcProjectXml.AddLicenses(license.Value);
@@ -320,25 +323,27 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     /// Configure the environment for the NetID, Platform, Boot project.
     /// The parameters is set in the appsettings.json file for the target and the TcUnit
     /// </summary>
-    /// <param name="config">Parameters from the appsettings.json</param>
-    public void ConfigureTarget(IConfiguration config)
+    /// <param name="netId">The NetID of the target.</param>
+    /// <param name="platform">The platform of the target.</param>
+    public void ConfigureTarget(string netId, string platform)
     {
-        string netId = config.GetValue<string>("Target:NetId") ?? "192.168.17.10.1.1";
-        string platform = config.GetValue<string>("Target:Platform") ?? "TwinCAT RT (x64)";
         automationInterface.SetPlatform(platform);
         automationInterface.SetTarget(netId);
         automationInterface.GenerateBootProject();
     }
 
     /// <summary>
-    /// Injects Git version information into the PLC project's VERSION_INFO POU.
+    /// Injects version information into the PLC project's VERSION_INFO POU.
     /// </summary>
-    /// <param name="gitInfo">The Git information to inject.</param>
-    public void InjectGitVersion(IGitInfo gitInfo)
+    /// <param name="version">Version in <c>major.minor.build.revision</c> format (for example <c>1.0.0.0</c>).</param>
+    /// <param name="commitHash">Commit hash to inject.</param>
+    /// <param name="commitTime">Commit timestamp to inject.</param>
+    public void InjectGitVersion(string version, string commitHash, string commitTime)
     {
+        ValidateVersionString(version);
+
         log.LogInformation("- - - - - Git injection - - - - -");
-        log.LogInformation("Initiating injection of GIT information");
-        automationInterface.UpdateVersionFile(gitInfo);
+        automationInterface.UpdateVersionFile(version, commitHash, commitTime);
         log.LogInformation("Finished Injection of GIT information");
     }
 
@@ -414,6 +419,7 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
         int tcBuildError = 0;
         int i = 0;
 
+        log.LogInformation("- - - - - Print Error list - - - - -");
         try
         {
             for (i = 0; i < errorsBuild.Count; i++)
@@ -479,12 +485,13 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     /// Saves the PLC project as a versioned library file to the specified output directory.
     /// </summary>
     /// <param name="outputDir">The directory to save the library to.</param>
-    /// <param name="shortGitVersion">The Git information used for library versioning.</param>
-    public async Task SaveLibrary(string outputDir, string shortGitVersion)
+    /// <param name="version">Semantic version used for library versioning.</param>
+    public async Task SaveAsLibrary(string outputDir, string version)
     {
+        ValidateVersionString(version);
+
         log.LogInformation("- - - - - Saving library - - - - -");
-        log.LogInformation("Starting to save the library");
-        await automationInterface.SaveLibraryFile(outputDir, shortGitVersion);
+        await automationInterface.SaveLibraryFile(outputDir, version);
         log.LogInformation("Finished saving the library");
     }
     #endregion
@@ -509,11 +516,10 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     /// <summary>
     /// Configures the TcUnit library for test result publishing using settings from the application configuration.
     /// </summary>
-    /// <param name="config">The application configuration containing the <c>UnitTest:TcUnitResultPath</c> setting.</param>
-    public async Task SetupTcUnitTest(IConfiguration config)
+    /// <param name="resultPath">The path where the TcUnit results should be saved.</param>
+    public async Task SetupTcUnitTest(string resultPath)
     {
-        string resPath = config.GetValue<string>("UnitTest:TcUnitResultPath") ?? "/home/Administrator/TcUnitResults.xml";
-        await automationInterface.SetupTcUnitLibrary(resPath);
+        await automationInterface.SetupTcUnitLibrary(resultPath);
     }
 
     /// <summary>
@@ -521,10 +527,9 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     /// then prints the test results. Times out after 60 seconds.
     /// </summary>
     /// <exception cref="TwinCatException">Thrown when the timeout expires before tests complete.</exception>
-    public async Task WaitForUnitTestToDone()
+    public async Task WaitForUnitTestToDone(int timeoutMs = 60_000)
     {
         log.LogInformation("- - - - - Waiting on unit tests - - - - -");
-        int timeoutMs = 60_000;
         int pollIntervalMs = 2_000;
         var startTime = DateTime.UtcNow;
 
@@ -543,4 +548,24 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
         await tcUnitRunner.PrintResultsFromUnitTest();
     }
     #endregion
+
+    /// <summary>
+    /// Validates that a version string uses 2 to 4 numeric dot-separated segments.
+    /// </summary>
+    /// <param name="version">The version string to validate.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="version"/> is null, empty, or not in the expected numeric format.</exception>
+    private static void ValidateVersionString(string version)
+    {
+        if (string.IsNullOrWhiteSpace(version))
+            throw new ArgumentException("Version cannot be null or empty. " +
+                "Expected format: 2 to 4 numeric segments (e.g. 1.0, 1.0.0, 1.0.0.0)", nameof(version));
+
+        string[] versionParts = version.Split('.');
+        bool isValidVersion = versionParts.Length >= 2
+            && versionParts.Length <= 4
+            && versionParts.All(part => !string.IsNullOrWhiteSpace(part) && int.TryParse(part, out _));
+        if (!isValidVersion)
+            throw new ArgumentException("Invalid version format. " +
+                "Expected format: 2 to 4 numeric segments (e.g. 1.0, 1.0.0, 1.0.0.0)", nameof(version));
+    }
 }

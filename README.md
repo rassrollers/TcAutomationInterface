@@ -59,6 +59,10 @@ AutomationInterface.core:
 
 Use the `Example.cs` and `appsettings.json` in the `Example` directory as a template for building a TwinCAT project and deploy it to a target.
 
+Some times the XAE needs to be open to handle of the UI component. This can be done by setting the `--UiXae` argument. 
+
+If you don't want the IDE to be in focus, you should not use the `--UserControl` argument.
+
 ### Command-Line Options
 
 | Option | Short | Required | Description |

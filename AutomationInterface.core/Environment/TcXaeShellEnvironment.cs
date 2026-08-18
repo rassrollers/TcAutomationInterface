@@ -1,8 +1,7 @@
 ﻿using EnvDTE80;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Runtime.CompilerServices;
 using System.Runtime.Versioning;
+using System.Threading.Tasks;
 
 namespace AutomationInterface.core;
 
@@ -493,6 +492,34 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
         log.LogInformation("- - - - - Saving library - - - - -");
         await automationInterface.SaveLibraryFile(outputDir, version);
         log.LogInformation("Finished saving the library");
+    }
+    #endregion
+
+    #region System configuration
+    /// <summary>
+    /// Adds a license dongle to the current XAE project's SYSTEM configuration and saves the solution.
+    /// </summary>
+    /// <param name="name">The name of the license dongle.</param>
+    /// <returns>A task that represents the asynchronous save operation.</returns>
+    /// <exception cref="AutomationInterfaceException">Thrown when the SYSTEM license reference is unavailable or the project is not an XAE project.</exception>
+    public async Task AddLicenseDongle(string name = "Dongle 1")
+    {
+        log.LogInformation("Adding license dongle");
+        automationInterface.AddLicenseDongle(name);
+        await visualStudioEnvironment.SaveAll();
+    }
+
+    /// <summary>
+    /// Adds a real-time task to the current XAE project's SYSTEM configuration and saves the solution.
+    /// </summary>
+    /// <param name="name">The name of the real-time task.</param>
+    /// <returns>A task that represents the asynchronous save operation.</returns>
+    /// <exception cref="AutomationInterfaceException">Thrown when the additional tasks reference is unavailable or the project is not an XAE project.</exception>
+    public async Task AddTask(string name)
+    {
+        log.LogInformation("Adding task: {name}", name);
+        automationInterface.AddTask(name);
+        await visualStudioEnvironment.SaveAll();
     }
     #endregion
 

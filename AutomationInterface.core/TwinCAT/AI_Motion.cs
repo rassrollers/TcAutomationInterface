@@ -3,7 +3,7 @@
 namespace AutomationInterface.core;
 
 /// <summary>
-/// Partial class of Automation Interface containing Motion/NC axis management code.
+/// Partial class of Automation Interface containing MOTION management code.
 /// </summary>
 public partial class AutomationInterface
 {

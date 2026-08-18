@@ -124,33 +124,54 @@ try
     #endregion
 
     #region Create new XAE project test
-    using TcXaeShellEnvironment env = new(logger);
+    //using TcXaeShellEnvironment env = new(logger);
     
     //var runningEnvironments = env.FindRunningEnvironments();
     //if (runningEnvironments.Count() == 0)
     //    throw new TwinCatException("No running TwinCAT XAE Shell environment was found on the system. Please start a new instance of TwinCAT XAE Shell and try again.");
     //await env.AttachToEnvironment(runningEnvironments.First());
 
-    var xaeList = env.FindInstalledTcXaeShell();
+    //var xaeList = env.FindInstalledTcXaeShell();
+    //if (xaeList.Count == 0)
+    //    throw new TwinCatException("No installed TwinCAT XAE Shell was found on the system.");
+    //await env.CreateSolutionEnvironment(xaeList.Last(), "TestTemplates", options!.WorkDir, options.UiXae, options.UserControl);
+    //await env.CreateProjectFromTemplate(TcProjectType.XaeProject.ToString(), options.WorkDir, "TestProject");
+    //await env.AddPlcProjectFromTemplate(TcProjectType.StandardPlcProject.ToString(), "TestPlc");
+    //
+    //await env.CreateProgramItem("TestProgram", ProgramItemsTypes.Program.ToString(), "POUs");
+    //await env.CreateProgramItem("TestFunction", ProgramItemsTypes.Function.ToString(), "POUs", returnType:"Bool");
+    //await env.CreateProgramItem("TestFunctionBlock", ProgramItemsTypes.FunctionBlock.ToString(), "POUs");
+    //await env.CreateProgramItem("TestStruct", ProgramItemsTypes.Struct.ToString(), "DUTs");
+    //await env.CreateProgramItem("TestEnum", ProgramItemsTypes.Enum.ToString(), "DUTs");
+    //await env.CreateProgramItem("TestUnion", ProgramItemsTypes.Union.ToString(), "DUTs");
+    //await env.CreateProgramItem("TestGVL", ProgramItemsTypes.GVL.ToString(), "GVLs");
+    //await env.CreateProgramItem("TestParam", ProgramItemsTypes.ParameterList.ToString(), "GVLs");
+    //await env.CreateProgramItem("TestVisu", ProgramItemsTypes.Visualization.ToString(), "VISUs");
+    //await env.CreateProgramItem("ITFs", ProgramItemsTypes.Folder.ToString(), "");
+    //await env.CreateProgramItem("TestInterface", ProgramItemsTypes.Interface.ToString(), "ITFs");
+    //
+    //env.InjectGitVersion("1.0.0", "34fds34", "2024-06-05T12:34:56Z");
+    //
+    //Console.WriteLine("Done!");
+    //Console.ReadLine();
+    #endregion
+
+    #region Testing system config
+    using TcXaeShellEnvironment env = new(logger);
+    var solutionFiles = FilesAndPathTools.FindSolutionFiles(options!.WorkDir);
+
+    var xaeList = env.FindRunningEnvironments();
     if (xaeList.Count == 0)
         throw new TwinCatException("No installed TwinCAT XAE Shell was found on the system.");
-    await env.CreateSolutionEnvironment(xaeList.Last(), "TestTemplates", options!.WorkDir, options.UiXae, options.UserControl);
-    await env.CreateProjectFromTemplate(TcProjectType.XaeProject.ToString(), options.WorkDir, "TestProject");
-    await env.AddPlcProjectFromTemplate(TcProjectType.StandardPlcProject.ToString(), "TestPlc");
+    await env.AttachToEnvironment(xaeList.First());
 
-    await env.CreateProgramItem("TestProgram", ProgramItemsTypes.Program.ToString(), "POUs");
-    await env.CreateProgramItem("TestFunction", ProgramItemsTypes.Function.ToString(), "POUs", returnType:"Bool");
-    await env.CreateProgramItem("TestFunctionBlock", ProgramItemsTypes.FunctionBlock.ToString(), "POUs");
-    await env.CreateProgramItem("TestStruct", ProgramItemsTypes.Struct.ToString(), "DUTs");
-    await env.CreateProgramItem("TestEnum", ProgramItemsTypes.Enum.ToString(), "DUTs");
-    await env.CreateProgramItem("TestUnion", ProgramItemsTypes.Union.ToString(), "DUTs");
-    await env.CreateProgramItem("TestGVL", ProgramItemsTypes.GVL.ToString(), "GVLs");
-    await env.CreateProgramItem("TestParam", ProgramItemsTypes.ParameterList.ToString(), "GVLs");
-    await env.CreateProgramItem("TestVisu", ProgramItemsTypes.Visualization.ToString(), "VISUs");
-    await env.CreateProgramItem("ITFs", ProgramItemsTypes.Folder.ToString(), "");
-    await env.CreateProgramItem("TestInterface", ProgramItemsTypes.Interface.ToString(), "ITFs");
+    var projects = env.FindProjectsInSolution(solutionFiles.First().SolutionFilePath);
+    if (projects.Count() == 0)
+        throw new TwinCatException("No projects were found in the solution.");
+    await env.SelectProjectInSolution(projects.First());
 
-    env.InjectGitVersion("1.0.0", "34fds34", "2024-06-05T12:34:56Z");
+    await env.AddLicenseDongle();
+    await env.AddTask("TestTask");
 
     Console.WriteLine("Done!");
     Console.ReadLine();

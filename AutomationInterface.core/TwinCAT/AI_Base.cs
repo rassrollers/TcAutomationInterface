@@ -108,7 +108,7 @@ public partial class AutomationInterface : IDisposable
     }
     #endregion
 
-    #region Retry logic'
+    #region Retry logic
     /// <summary>
     /// COM error code indicating that a child item was not found in the TwinCAT system manager tree.
     /// </summary>
@@ -479,6 +479,42 @@ public partial class AutomationInterface : IDisposable
             throw new AutomationInterfaceException("System manager was not set");
         
         return sysManager.IsTwinCATStarted();
+    }
+    #endregion
+
+    #region Helper methods
+    /// <summary>
+    /// Updates the value of the first XML element with the specified name.
+    /// </summary>
+    /// <param name="xml">The XML string to update.</param>
+    /// <param name="variableName">The name of the element whose value should be changed.</param>
+    /// <param name="value">The new element value.</param>
+    /// <returns>The updated XML string.</returns>
+    /// <exception cref="ArgumentException">Thrown when an argument is null or whitespace.</exception>
+    /// <exception cref="TcXmlException">Thrown when the XML is invalid or the element cannot be found.</exception>
+    private static string UpdateXmlVariable(string xml, string variableName, string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(xml);
+        ArgumentException.ThrowIfNullOrWhiteSpace(variableName);
+        ArgumentNullException.ThrowIfNull(value);
+
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(xml, LoadOptions.PreserveWhitespace);
+        }
+        catch (Exception ex) when (ex is System.Xml.XmlException)
+        {
+            throw new TcXmlException("Unable to parse XML string", ex);
+        }
+
+        XElement element = document
+            .Descendants()
+            .FirstOrDefault(candidate => candidate.Name.LocalName == variableName)
+            ?? throw new TcXmlException($"XML element '{variableName}' not found");
+
+        element.Value = value;
+        return document.ToString(SaveOptions.DisableFormatting);
     }
     #endregion
 }

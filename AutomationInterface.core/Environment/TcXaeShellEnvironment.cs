@@ -45,6 +45,7 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     private readonly TcUnitRunner tcUnitRunner;
     private TcProjectXml? tcProjectXml;
     private TcEnvironmenState tcState = TcEnvironmenState.NotInitialized;
+    private bool uiXaeEnabled = false;
 
     #region Constructor and dispose
     /// <summary>
@@ -104,6 +105,7 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     {
         log.LogInformation("- - - - - Creating solution - - - - -");
         await visualStudioEnvironment.CreateSolution(xaeDte, solutionName, solutionPath, uiXae, userControl);
+        uiXaeEnabled = uiXae;
     }
 
     /// <summary>
@@ -162,6 +164,7 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     {
         log.LogInformation("- - - - - Open project - - - - -");
         await visualStudioEnvironment.OpenSolution(solutionPath, uiXae, userControl);
+        uiXaeEnabled = uiXae;
         await automationInterface.SetSilentMode();
 
         tcState = TcEnvironmenState.SolutionOpened;
@@ -347,15 +350,6 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Reloads all Motion/NC axis elements in the Solution Explorer.
-    /// Requires the XAE UI to be visible (<see cref="BuildOptions.UiXae"/> = <see langword="true"/>).
-    /// </summary>
-    public async Task ReloadMotionElements()
-    {
-        await automationInterface.ReloadMotionElements();
-    }
-
-    /// <summary>
     /// Gets the list of available project variant names in the current TwinCAT project.
     /// </summary>
     /// <returns>A list of variant name strings.</returns>
@@ -520,6 +514,45 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
         log.LogInformation("Adding task: {name}", name);
         automationInterface.AddTask(name);
         await visualStudioEnvironment.SaveAll();
+    }
+    #endregion
+
+    #region Motion configuration
+    /// <summary>
+    /// Adds a motion task to the current XAE project's NC configuration and saves the solution.
+    /// </summary>
+    /// <param name="name">The name of the motion task.</param>
+    /// <returns>A task that represents the asynchronous save operation.</returns>
+    /// <exception cref="AutomationInterfaceException">Thrown when the NC configuration reference is unavailable or the project is not an XAE project.</exception>
+    public async Task AddMotionTask(string name = "NC-Task")
+    {
+        log.LogInformation("Adding Motion task");
+        automationInterface.AddMotionTask(name);
+        await visualStudioEnvironment.SaveAll();
+    }
+
+    /// <summary>
+    /// Adds a motion axis to the first motion task in the current XAE project and saves the solution.
+    /// </summary>
+    /// <param name="name">The name of the motion axis.</param>
+    /// <returns>A task that represents the asynchronous save operation.</returns>
+    /// <exception cref="AutomationInterfaceException">Thrown when the system or NC configuration reference is unavailable or the project is not an XAE project.</exception>
+    public async Task AddMotionAxis(string name = "Axis 1")
+    {
+        log.LogInformation("Adding Motion axis");
+        automationInterface.AddMotionAxis(name);
+        await visualStudioEnvironment.SaveAll();
+    }
+
+    /// <summary>
+    /// Reloads all Motion/NC axis elements in the Solution Explorer.
+    /// Requires the XAE UI to be visible (<see cref="BuildOptions.UiXae"/> = <see langword="true"/>).
+    /// </summary>
+    public async Task ReloadMotionElements()
+    {
+        if (!uiXaeEnabled)
+            throw new TwinCatException("Reloading Motion elements requires the XAE UI to be visible. Set UiXae = true.");
+        await automationInterface.ReloadMotionElements();
     }
     #endregion
 

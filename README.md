@@ -28,7 +28,7 @@ AutomationInterface.core:
     * AutomationInterface (partial class)
         * AI_Base                 - System manager, configuration, and runtime control
         * AI_LibraryRepo          - Library reference management and installation
-        * AI_Motion               - NC/Motion axis reload via Solution Explorer
+        * AI_Motion               - NC/Motion task, axes and reload via Solution Explorer
         * AI_PlcProject           - PLC project references, version injection, library export
         * AI_ProgramItems         - Program item management (POU, DUT, GVL, etc.)
         * AI_System               - System setup (License, Task, etc.)

@@ -31,6 +31,7 @@ public partial class AutomationInterface : IDisposable
     private ITcSmTreeItem? realTimeLicense = null;
     private ITcSmTreeItem? realTimeAdditionalTasks = null;
     private ITcSmTreeItem? routeConfig = null;
+    private ITcSmTreeItem? ncConfig = null;
     // Additional settings
     private ITcRemoteManager? tcRemoteManager = null;
     private ITcAutomationSettings? tcAutomationSettings = null;
@@ -204,7 +205,10 @@ public partial class AutomationInterface : IDisposable
             await SetupBaseAiRefs();
 
         if (projectType == TcProjectExtension.tsproj)
+        {
             SetupRealTimeConfigRefs();
+            SetupNcConfigRefs();
+        }
 
         FindPlcProjectRefs();
         FindIecPlcProjectRefs();
@@ -238,6 +242,10 @@ public partial class AutomationInterface : IDisposable
             throw new AutomationInterfaceException("System manager is already set");
     }
 
+    /// <summary>
+    /// Initializes the tree item references used by the XAE real-time configuration.
+    /// </summary>
+    /// <exception cref="AutomationInterfaceException">Thrown when the current project is not an XAE project or a required reference cannot be initialized.</exception>
     private void SetupRealTimeConfigRefs()
     {
         if (projectType != TcProjectExtension.tsproj)
@@ -253,6 +261,22 @@ public partial class AutomationInterface : IDisposable
 
         if (realTimeConfig is null || realTimeLicense is null || realTimeAdditionalTasks is null || routeConfig is null)
             throw new AutomationInterfaceException("Real-Time configuration references were not set properly");
+    }
+
+    /// <summary>
+    /// Initializes the tree item reference used by the XAE NC configuration.
+    /// </summary>
+    /// <exception cref="AutomationInterfaceException">Thrown when the current project is not an XAE project or the NC configuration reference cannot be initialized.</exception>
+    private void SetupNcConfigRefs()
+    {
+        if (projectType != TcProjectExtension.tsproj)
+            throw new AutomationInterfaceException("NC configuration references are only available for XAE projects");
+        Retry(() =>
+        {
+            ncConfig = (ITcSmTreeItem)sysManager!.LookupTreeItem(TreeItems.NC_CONFIG);
+        }, actionName: "NcConfigReferences");
+        if (ncConfig is null)
+            throw new AutomationInterfaceException("NC configuration reference was not set properly");
     }
     #endregion
 

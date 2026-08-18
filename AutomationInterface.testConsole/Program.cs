@@ -172,6 +172,8 @@ try
 
     await env.AddLicenseDongle();
     await env.AddTask("TestTask");
+    await env.AddMotionTask("TestMotionTask");
+    await env.AddMotionAxis();
 
     Console.WriteLine("Done!");
     Console.ReadLine();

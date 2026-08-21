@@ -24,12 +24,19 @@ public sealed class StaComHost : IDisposable
 
         thread = new Thread(() =>
         {
+            // OleInitialize (not just CoInitializeEx/STA) is required for CoRegisterMessageFilter
+            // to actually take effect; without it, COM busy calls throw RPC_E_SERVERCALL_RETRYLATER
+            // immediately instead of being retried transparently by the RPC layer.
+            Marshal.ThrowExceptionForHR(OleInitialize(IntPtr.Zero));
+
             // Install default SynchronizationContext
             SynchronizationContext.SetSynchronizationContext(new SynchronizationContext());
 
             schedulerTcs.SetResult(TaskScheduler.FromCurrentSynchronizationContext());
 
             RunMessageLoop();
+
+            OleUninitialize();
         });
 
         thread.SetApartmentState(ApartmentState.STA);
@@ -117,6 +124,12 @@ public sealed class StaComHost : IDisposable
 
     [DllImport("user32.dll")]
     private static extern void PostQuitMessage(int nExitCode);
+
+    [DllImport("ole32.dll")]
+    private static extern int OleInitialize(IntPtr pvReserved);
+
+    [DllImport("ole32.dll")]
+    private static extern void OleUninitialize();
 
     #endregion
 }

@@ -1,7 +1,6 @@
 ﻿using EnvDTE80;
 using Microsoft.Extensions.Logging;
 using System.Runtime.Versioning;
-using System.Threading.Tasks;
 
 namespace AutomationInterface.core;
 
@@ -164,6 +163,9 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     {
         log.LogInformation("- - - - - Open project - - - - -");
         await visualStudioEnvironment.OpenSolution(solutionPath, uiXae, userControl);
+        // SilentMode must be set before Open() returns/settles - solution-load-time consistency
+        // checks (e.g. a "Released" PLC project) can otherwise show a blocking modal message box.
+        await visualStudioEnvironment.OpenSolution(solutionPath, uiXae, userControl, beforeOpen: automationInterface.SetSilentMode);
         uiXaeEnabled = uiXae;
         await automationInterface.SetSilentMode();
 
@@ -353,7 +355,7 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     /// Gets the list of available project variant names in the current TwinCAT project.
     /// </summary>
     /// <returns>A list of variant name strings.</returns>
-    public List<string> GetAvailableProjectVariant()
+    public Task<List<string>> GetAvailableProjectVariant()
     {
         return automationInterface.GetAvailableProjectVariants();
     }
@@ -362,9 +364,9 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     /// Sets the active project variant by name.
     /// </summary>
     /// <param name="variant">The variant name to activate.</param>
-    public void SetProjectVariant(string variant)
+    public async Task SetProjectVariant(string variant)
     {
-        automationInterface.SetProjectVariant(variant);
+        await automationInterface.SetProjectVariant(variant);
     }
 
     /// <summary>
@@ -469,7 +471,7 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     /// Checks whether the target TwinCAT system runtime is currently running.
     /// </summary>
     /// <returns><see langword="true"/> if the target TwinCAT system is started; otherwise <see langword="false"/>.</returns>
-    public bool IsTargetTcSysRunning()
+    public Task<bool> IsTargetTcSysRunning()
     {
         return automationInterface.IsTargetTcSysRunning();
     }

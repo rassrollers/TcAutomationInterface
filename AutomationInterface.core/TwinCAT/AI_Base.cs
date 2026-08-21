@@ -151,7 +151,7 @@ public partial class AutomationInterface : IDisposable
     /// <param name="actionName">A descriptive name for the action (used in log messages).</param>
     /// <param name="maxRetries">The maximum number of retry attempts.</param>
     /// <param name="delayMilliseconds">The delay in milliseconds between retries.</param>
-    private void Retry(RetryAction action, string actionName, int maxRetries = 5, int delayMilliseconds = 1000)
+    private void Retry(RetryAction action, string actionName, int maxRetries = 5, int delayMilliseconds = 2000)
     {
         int attempt = 0;
         Exception? lastException = null;
@@ -160,7 +160,9 @@ public partial class AutomationInterface : IDisposable
         {
             try
             {
-                action();
+                // sysManager and friends are STA-bound to vsEnv's DTE thread; calling them from any
+                // other thread turns every access into a cross-apartment COM call subject to busy errors.
+                vsEnv.RunOnStaThread(() => action()).GetAwaiter().GetResult();
                 return; // Success
             }
             catch (COMException ex) when (IsRetryable(ex))
@@ -304,6 +306,7 @@ public partial class AutomationInterface : IDisposable
     /// </summary>
     internal async Task SetSilentMode()
     {
+        log.LogDebug("Setting Automation Interface to silent mode");
         await SetAutomationSettingsIfNeeded();
         Retry(() =>
         {
@@ -385,9 +388,10 @@ public partial class AutomationInterface : IDisposable
     /// Get all the available project variants in the current project
     /// </summary>
     /// <returns>A string list of available project variants</returns>
-    public List<string> GetAvailableProjectVariants()
+    public async Task<List<string>> GetAvailableProjectVariants()
     {
-        var variants = sysManager!.ProjectVariantConfig;
+        string variants = "";
+        await vsEnv.RunOnStaThread(() => variants = sysManager!.ProjectVariantConfig);
         XDocument doc = XDocument.Parse(variants);
 
         List<string> names = doc
@@ -402,16 +406,16 @@ public partial class AutomationInterface : IDisposable
     /// </summary>
     /// <param name="variantName"></param>
     /// <returns>True if successful</returns>
-    public bool SetProjectVariant(string variantName)
+    public async Task<bool> SetProjectVariant(string variantName)
     {
         log.LogInformation("Setting project variant: {variantName}", variantName);
-        var variants = GetAvailableProjectVariants();
+        var variants = await GetAvailableProjectVariants();
         if (!variants.Contains(variantName))
         {
             log.LogError($"The requested variant '{variantName}' was not found in the project variants.");
             return false;
         }
-        sysManager!.CurrentProjectVariant = variantName;
+        await vsEnv.RunOnStaThread(() => sysManager!.CurrentProjectVariant = variantName);
         return true;
     }
 
@@ -419,9 +423,11 @@ public partial class AutomationInterface : IDisposable
     /// Gets the currently active project variant name.
     /// </summary>
     /// <returns>The current project variant string.</returns>
-    public string GetProjectVariant()
+    public async Task<string> GetProjectVariant()
     {
-        return sysManager!.CurrentProjectVariant;
+        string currentVariant = "";
+        await vsEnv.RunOnStaThread(() => currentVariant = sysManager!.CurrentProjectVariant);
+        return currentVariant;
     }
     #endregion
 
@@ -497,12 +503,14 @@ public partial class AutomationInterface : IDisposable
     /// </summary>
     /// <returns>Return TRUE if TwinCAT system is started</returns>
     /// <exception cref="AutomationInterfaceException">System manager was not set</exception>
-    internal bool IsTargetTcSysRunning()
+    internal async Task<bool> IsTargetTcSysRunning()
     {
         if (sysManager is null)
             throw new AutomationInterfaceException("System manager was not set");
         
-        return sysManager.IsTwinCATStarted();
+        bool isRunning = false;
+        await vsEnv.RunOnStaThread(() => isRunning = sysManager.IsTwinCATStarted());
+        return isRunning;
     }
     #endregion
 

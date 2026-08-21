@@ -3,9 +3,7 @@ using CommandLine;
 using LibGit2Sharp;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Reflection.Emit;
 using System.Runtime.InteropServices;
-using TwinCAT.Ads;
 
 // Setup configuration from appsettings.json
 IConfiguration config = AppTools.SetupConfiguration(new ConfigurationBuilder());

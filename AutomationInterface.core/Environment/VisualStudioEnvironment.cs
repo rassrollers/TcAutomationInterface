@@ -301,7 +301,7 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
     /// <param name="delayMilliseconds">Delay in milliseconds between retries.</param>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="maxRetries"/> is less than 1.</exception>
     /// <exception cref="InvalidOperationException">Thrown when all retry attempts are exhausted.</exception>
-    private async Task RetryAsync(Func<Task> action, string actionName, int maxRetries = 5, int delayMilliseconds = 1000)
+    private async Task RetryAsync(Func<Task> action, string actionName, int maxRetries = 5, int delayMilliseconds = 2000)
     {
         if (maxRetries < 1)
             throw new ArgumentOutOfRangeException(nameof(maxRetries), $"maxRetries must be at least 1 for {actionName}");
@@ -340,7 +340,7 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
     /// <returns>The result of the function on success.</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="maxRetries"/> is less than 1.</exception>
     /// <exception cref="InvalidOperationException">Thrown when all retry attempts are exhausted.</exception>
-    private async Task<T> RetryAsync<T>(Func<Task<T>> action, string actionName, int maxRetries = 5, int delayMilliseconds = 1000)
+    private async Task<T> RetryAsync<T>(Func<Task<T>> action, string actionName, int maxRetries = 5, int delayMilliseconds = 2000)
     {
         if (maxRetries < 1)
             throw new ArgumentOutOfRangeException(nameof(maxRetries), $"maxRetries must be at least 1 for {actionName}");
@@ -513,13 +513,23 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
     /// <param name="pathToSolutionFile">The full path to the <c>.sln</c> file.</param>
     /// <param name="openXaeUi">Whether to show the XAE user interface.</param>
     /// <param name="userControl">Whether to enable user control of the VS process.</param>
-    internal async Task OpenSolution(string pathToSolutionFile, bool openXaeUi = false, bool userControl = false)
+    /// <param name="beforeOpen">
+    /// Optional hook invoked after the DTE is created but before the solution is opened - used to
+    /// enable silent mode early, since solution-load-time consistency checks (e.g. a PLC project's
+    /// "Released" flag) can otherwise trigger a modal message box before silent mode is ever set,
+    /// which blocks forever on a headless machine.
+    /// </param>
+    internal async Task OpenSolution(string pathToSolutionFile, bool openXaeUi = false, bool userControl = false, Func<Task>? beforeOpen = null)
     {
         string solutionVsVersion = FindVsVersionInSolution(pathToSolutionFile);
         string tcXaseShellDteVersion = CheckTcXaeShellAvailability(solutionVsVersion);
         await CreateDte(tcXaseShellDteVersion, openXaeUi, userControl);
         await SetSolutionHandler();
         log.LogInformation("Opening solution: {path}", pathToSolutionFile);
+
+        if (beforeOpen is not null)
+            await beforeOpen();
+
         await RetryAsync(() =>
         {
             return host.RunAsync(() => vsSolution!.Open(pathToSolutionFile));
@@ -1222,5 +1232,13 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
             });
         }, "Getting TwinCAT System Manager references");
     }
+
+     /// <summary>
+    /// Runs an action on the STA thread that owns the DTE and TwinCAT COM objects.
+    /// COM objects such as <c>ITcSysManager15</c> are apartment-bound to this thread; accessing them
+    /// from any other thread forces COM to marshal the call across apartments, which is what
+    /// surfaces as spurious <c>RPC_E_SERVERCALL_RETRYLATER</c>/busy errors.
+    /// </summary>
+    internal Task RunOnStaThread(Action action) => host.RunAsync(action);
     #endregion
 }

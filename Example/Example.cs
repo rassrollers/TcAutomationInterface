@@ -57,7 +57,7 @@ try
     tcEnv.InstallLibrariesFromDirectory(Path.Combine(options.WorkDir, "PlcProject\\_Libraries"));
     
     // Prepare TcUnit test environment
-    tcEnv.SetProjectVariant("iTest");
+    await tcEnv.SetProjectVariant("iTest");
     tcEnv.SetupTcUnitTest(config["UnitTest:TcUnitResultPath"]);
     
     // Build and deploy the solution to the target PLC

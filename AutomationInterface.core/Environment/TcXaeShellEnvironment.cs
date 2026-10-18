@@ -383,10 +383,25 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     #region Build and deploy
     /// <summary>
     /// Performs a clean rebuild of the solution (clean + build) and throws if build errors are detected.
+    /// Use <see cref="CleanAndRebuildSolutionWithReport"/> to get the Error List back instead of an exception.
     /// </summary>
     /// <exception cref="TwinCatException">Thrown when the build produces errors.</exception>
     public async Task CleanAndRebuildSolution()
     {
+        var result = await CleanAndRebuildSolutionWithReport();
+        if (!result.Succeeded)
+            throw new TwinCatException($"Build resulted in errors! {result.ErrorList.Summary}");
+    }
+
+    /// <summary>
+    /// Performs a clean rebuild of the solution (clean + build), logs the Error List and returns
+    /// a <see cref="BuildResult"/> with the errors and warnings. Does not throw on build errors.
+    /// </summary>
+    /// <param name="reportQuery">Filter for the returned Error List. Default: warnings and errors, max 200 items.</param>
+    public async Task<BuildResult> CleanAndRebuildSolutionWithReport(ErrorListQuery? reportQuery = null)
+    {
+        reportQuery ??= new ErrorListQuery { MinSeverity = ErrorListSeverity.Warning };
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         log.LogInformation("- - - - - Rebuild solution - - - - -");
         log.LogInformation("Performing a clean rebuild");
         log.LogDebug("Cleaning solution...");
@@ -394,59 +409,56 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
         log.LogDebug("Building solution...");
         await visualStudioEnvironment.BuildSolution();
         log.LogDebug("Printing potential errors...");
+        stopwatch.Stop();
 
-        var (_, _, tcBuildError) = await LogErrorListFromVS(vsBuildErrorLevel.vsBuildErrorLevelMedium);
-        if (tcBuildError > 0)
-            throw new TwinCatException("Build resulted in errors!");
-        log.LogInformation("Clean rebuild finished");
+        var errorList = await GetErrorList(reportQuery);
+        LogErrorList(errorList);
+
+        log.LogInformation("Clean rebuild finished in {duration:0.0} s: {summary}", stopwatch.Elapsed.TotalSeconds, errorList.Summary);
+        return new BuildResult
+        {
+            Succeeded = errorList.ErrorCount == 0,
+            Duration = stopwatch.Elapsed,
+            ErrorList = errorList
+        };
     }
 
     /// <summary>
-    /// Log the output from the Error List in TcXaeShell at a minimum error level
+    /// Reads the Error List of the TcXaeShell (build errors, warnings, messages and ADS logger output such as TcUnit results).
     /// </summary>
-    /// <param name="errorLevel">Minimum error level to be logged</param>
-    /// <returns>Number of Info/Warn/Error</returns>
-    private async Task<(int infoCount, int warningCount, int errorCount)> LogErrorListFromVS(vsBuildErrorLevel errorLevel)
+    /// <param name="query">Optional filter. Default: everything, max 200 items, duplicates removed.</param>
+    /// <returns>The totals and the matching items, most severe first.</returns>
+    public async Task<ErrorListResult> GetErrorList(ErrorListQuery? query = null)
     {
-        var errorsBuild = await visualStudioEnvironment.GetErrorItems();
-        int tcBuildInfo = 0;
-        int tcBuildWarnings = 0;
-        int tcBuildError = 0;
-        int i = 0;
+        query ??= new ErrorListQuery();
+        var entries = await visualStudioEnvironment.GetErrorListEntries();
+        return query.Apply(entries);
+    }
 
+    /// <summary>
+    /// Logs an Error List result with the log level matching each item's severity.
+    /// </summary>
+    private void LogErrorList(ErrorListResult errorList)
+    {
         log.LogInformation("- - - - - Print Error list - - - - -");
-        try
+        foreach (var item in errorList.Items)
         {
-            for (i = 0; i < errorsBuild.Count; i++)
-            {
-                ErrorItem item = errorsBuild[i];
-                if (item.ErrorLevel < errorLevel)
-                    continue;
-
-                switch (item.ErrorLevel)
+            switch (item.Severity)
                 {
-                    case vsBuildErrorLevel.vsBuildErrorLevelLow:
-                        log.LogInformation("{description} | {filename}", item.Description, item.FileName);
-                        tcBuildInfo++;
+                case ErrorListSeverity.Error:
+                    log.LogError("{item}", item.ToString());
                         break;
-                    case vsBuildErrorLevel.vsBuildErrorLevelMedium:
-                        log.LogWarning("{description} | {filename}", item.Description, item.FileName);
-                        tcBuildWarnings++;
+                case ErrorListSeverity.Warning:
+                    log.LogWarning("{item}", item.ToString());
                         break;
-                    case vsBuildErrorLevel.vsBuildErrorLevelHigh:
-                        log.LogError("{description} | {filename}", item.Description, item.FileName);
-                        tcBuildError++;
+                default:
+                    log.LogInformation("{item}", item.ToString());
                         break;
                 }
             }
-        }
-        catch (Exception ex)
-        {
-            log.LogError("Failed to print error list. {i}:{count}", i, errorsBuild.Count);
-            log.LogDebug("Exception details: {message}", ex.Message);
-        }
 
-        return (tcBuildInfo, tcBuildWarnings, tcBuildError);
+        if (errorList.Truncated)
+            log.LogInformation("... {more} more item(s) not shown", errorList.MatchedCount - errorList.Items.Count);
     }
 
     /// <summary>

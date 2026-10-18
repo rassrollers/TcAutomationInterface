@@ -34,14 +34,14 @@ class TcUnitRunner
     /// <returns><see langword="true"/> if TcUnit reports that tests have finished; otherwise <see langword="false"/>.</returns>
     public async Task<bool> IsTcUnitDone()
     {
-        _errorItems = await vsEnv.GetErrorItems();
-        for (int i = 1; i <= _errorItems.Count; i++)
+        var entries = await vsEnv.GetErrorListEntries();
+        for (int i = 1; i <= entries.Count; i++)
         {
-            ErrorItem item = _errorItems[i];
-            if (item.ErrorLevel < vsBuildErrorLevel.vsBuildErrorLevelHigh)
+            var entry = entries[i];
+            if (entry.Severity < ErrorListSeverity.Error)
                 continue;
 
-            if (item.Description.Contains(TCUNIT_FINISHED))
+            if (entry.Description.Contains(TCUNIT_FINISHED))
             {
                 Thread.Sleep(5000); // Extra wait for last results to printed out
                 return true;
@@ -56,9 +56,9 @@ class TcUnitRunner
     /// </summary>
     public async Task PrintResultsFromUnitTest()
     {
-        _errorItems = await vsEnv.GetErrorItems();
-        var errorList = _errorItems
-            .Where(e => e.ErrorLevel == vsBuildErrorLevel.vsBuildErrorLevelHigh)
+        var entries = await vsEnv.GetErrorListEntries();
+        var errorList = entries
+            .Where(e => e.Severity == ErrorListSeverity.Error)
             .OrderBy(e => e.Description)
             .ToList();
         foreach (var item in errorList)

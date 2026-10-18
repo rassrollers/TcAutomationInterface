@@ -70,7 +70,7 @@ public class GitInfo : IGitInfo, IDisposable
     {
         try
         {
-            string description = repo!.Describe(commit: repo.Head.Tip, options: new DescribeOptions { AlwaysRenderLongFormat = true });
+            string description = repo!.Describe(commit: repo.Head.Tip, options: new DescribeOptions { Strategy = DescribeStrategy.Tags, AlwaysRenderLongFormat = true });
             description = description.StartsWith("v") ? description.Substring(1) : description;
             Match match = Regex.Match(description, gitPattern);
             if (!match.Success)

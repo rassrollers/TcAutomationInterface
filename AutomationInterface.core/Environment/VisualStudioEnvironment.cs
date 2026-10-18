@@ -1043,9 +1043,12 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Gets the list of error items from the Visual Studio Error List window.
+    /// Reads the Visual Studio / TcXaeShell Error List and returns a thread-safe snapshot of all items.
+    /// All COM access happens on the STA thread; the returned <see cref="ErrorListEntry"/> objects are plain .NET objects.
+    /// Errors, warnings and messages are all made visible before reading, because the DTE only
+    /// returns the items that pass the Error List's current filter.
     /// </summary>
-    internal async Task<List<ErrorItem>> GetErrorItems()
+    internal async Task<List<ErrorListEntry>> GetErrorListEntries()
     {
         return await RetryAsync(() =>
         {
@@ -1054,17 +1057,52 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
                 if (vsDte is null)
                     throw new Exception("Visual Studio DTE was not set before getting Error items");
 
-                var items = vsDte.ToolWindows.ErrorList.ErrorItems;
-                var results = new List<ErrorItem>();
+                var errorList = vsDte.ToolWindows.ErrorList;
+                errorList.ShowErrors = true;
+                errorList.ShowWarnings = true;
+                errorList.ShowMessages = true;
 
-                for (int i = 1; i < items.Count; i++)
+                var items = errorList.ErrorItems;
+                int count = items.Count;
+                var results = new List<ErrorListEntry>(count);
+
+                // ErrorItems is a 1-based COM collection: valid indexes are 1..Count (inclusive)
+                for (int i = 1; i <= count; i++)
                 {
-                    results.Add(items.Item(i));
+                    try
+                    {
+                        ErrorItem item = items.Item(i);
+                        results.Add(new ErrorListEntry
+                        {
+                            Index = i,
+                            Severity = ErrorListEntry.FromVs(item.ErrorLevel),
+                            Description = SafeGet(() => item.Description) ?? string.Empty,
+                            FileName = SafeGet(() => item.FileName) ?? string.Empty,
+                            Line = SafeGet(() => item.Line),
+                            Column = SafeGet(() => item.Column),
+                            Project = SafeGet(() => item.Project) ?? string.Empty
+                        });
+                    }
+                    catch (COMException ex) when (IsRetryable(ex) || IsFatalDteError(ex))
+                    {
+                        throw; // Let RetryAsync / health monitoring handle it
+                    }
+                    catch (Exception ex)
+                    {
+                        // The list can shrink while we iterate (e.g. a build starts) - skip the item
+                        log.LogDebug("Could not read Error List item {index}/{count}: {message}", i, count, ex.Message);
+                    }
                 }
 
                 return results;
             });
         }, "Getting error items from DTE");
+
+        static T? SafeGet<T>(Func<T> getter)
+        {
+            try { return getter(); }
+            catch (COMException) { return default; }
+        }
     }
 
     /// <summary>

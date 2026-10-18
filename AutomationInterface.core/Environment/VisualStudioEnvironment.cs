@@ -96,12 +96,40 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
+    /// Releases this environment's COM references without closing the DTE instance.
+    /// The STA host remains available so another DTE can be attached afterward.
+    /// </summary>
+    /// <returns>A task representing the detach operation.</returns>
+    internal Task DetachAsync()
+    {
+        if (isClosed)
+            throw new ObjectDisposedException(nameof(VisualStudioEnvironment));
+
+        return host.RunAsync(() =>
+        {
+            if (vsDte is null)
+                throw new InvalidOperationException("Cannot detach because no DTE instance is attached.");
+
+            vsDte.UserControl = true;
+            CloseCore(quitDte: false);
+        });
+    }
+
+    /// <summary>
     /// Performs the actual cleanup of all COM references (build events, solution build, solution,
     /// project, and DTE) and revokes the OLE message filter. Must be called on the STA thread.
     /// </summary>
     public void CloseCore()
     {
-        log.LogInformation("Closing the Visual Studio Development Tools Environment (DTE)...");
+        CloseCore(quitDte: !isAttached);
+    }
+
+    private void CloseCore(bool quitDte)
+    {
+        log.LogInformation(
+            quitDte
+                ? "Closing the Visual Studio Development Tools Environment (DTE)..."
+                : "Detaching from the Visual Studio Development Tools Environment (DTE)...");
         try
         {
             // Clean up build events first to prevent callbacks during shutdown
@@ -195,11 +223,8 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
             {
                 try
                 {
-                    // Only call Quit if we created this instance, not if we attached to it
-                    if (!isAttached)
-                    {
+                    if (quitDte)
                         vsDte.Quit();
-                    }
                 }
                 catch (COMException ex) when (ex.HResult == unchecked((int)0x800706BA))
                 {
@@ -225,6 +250,7 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
                 finally
                 {
                     vsDte = null;
+                    isAttached = false;
                 }
             }
         }

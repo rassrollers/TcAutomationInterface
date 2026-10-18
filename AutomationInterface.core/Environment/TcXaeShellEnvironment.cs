@@ -272,13 +272,30 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     {
         log.LogInformation("- - - - - Attaching to environment - - - - -");
         var runningEnvironments = DteHelper.FindRunningDteInstances();
-        foreach (var env in runningEnvironments)
+        var env = runningEnvironments.FirstOrDefault(e => string.Equals(e.DisplayName, dteInstanceName, StringComparison.OrdinalIgnoreCase))
+            ?? runningEnvironments.FirstOrDefault(e => string.Equals(Path.GetFileNameWithoutExtension(e.DisplayName), dteInstanceName, StringComparison.OrdinalIgnoreCase));
+
+        if (env is null)
         {
-            if (env.DisplayName == dteInstanceName)
-            {
-                await visualStudioEnvironment.AttachToRunningDte(env);
-            }
+            var available = runningEnvironments.Count == 0 ? "none" : string.Join(", ", runningEnvironments.Select(e => $"'{e.DisplayName}'"));
+            throw new TwinCatException($"No running TcXaeShell instance named '{dteInstanceName}'. Running instances: {available}");
         }
+
+        await visualStudioEnvironment.AttachToRunningDte(env);
+        tcState = TcEnvironmenState.SolutionOpened;
+    }
+
+    /// <summary>
+    /// Detaches from the current development environment without closing its DTE instance.
+    /// The environment can later be attached again with <see cref="AttachToEnvironment"/>.
+    /// </summary>
+    public async Task DetachFromEnvironment()
+    {
+        automationInterface.Close();
+        await visualStudioEnvironment.DetachAsync();
+        tcProjectXml = null;
+        uiXaeEnabled = false;
+        tcState = TcEnvironmenState.NotInitialized;
     }
 
     /// <summary>
@@ -444,18 +461,18 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
         foreach (var item in errorList.Items)
         {
             switch (item.Severity)
-                {
+            {
                 case ErrorListSeverity.Error:
                     log.LogError("{item}", item.ToString());
-                        break;
+                    break;
                 case ErrorListSeverity.Warning:
                     log.LogWarning("{item}", item.ToString());
-                        break;
+                    break;
                 default:
                     log.LogInformation("{item}", item.ToString());
-                        break;
-                }
+                    break;
             }
+        }
 
         if (errorList.Truncated)
             log.LogInformation("... {more} more item(s) not shown", errorList.MatchedCount - errorList.Items.Count);

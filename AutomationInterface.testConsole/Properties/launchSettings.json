@@ -2,7 +2,7 @@
   "profiles": {
     "Test templates": {
       "commandName": "Project",
-      "commandLineArgs": "-w C:\\github\\TcAutomationInterface\\AiTest\\ -u -c"
+      "commandLineArgs": "-w C:\\github\\TcTcpUdpRT -s \"TcTcpUdpRT.sln\" -u -c"
     }
   }
 }

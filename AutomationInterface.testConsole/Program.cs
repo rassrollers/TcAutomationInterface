@@ -36,9 +36,9 @@ try
     AppTools.VerifyThatSystemIsWindows();
 #pragma warning disable CA1416 // Disable the warning on only Windows platforms
 
-    //options!.SolutionPath = FilesAndPathTools.FindFile(options!.WorkDir, options!.SolutionName)
-    //    ?? throw new FileNotFoundException($"The file '{options.SolutionName}' was not found in the directory '{options.WorkDir}'.");
-    //AppTools.PrintBuildInfo(logger, options);
+    options!.SolutionPath = FilesAndPathTools.FindFile(options!.WorkDir, options!.SolutionName)
+        ?? throw new FileNotFoundException($"The file '{options.SolutionName}' was not found in the directory '{options.WorkDir}'.");
+    AppTools.PrintBuildInfo(logger, options);
 
     #region Attach to running XAE instance test
     //var xae = new TcXaeShellEnvironment(logger);
@@ -123,7 +123,7 @@ try
 
     #region Create new XAE project test
     //using TcXaeShellEnvironment env = new(logger);
-    
+
     //var runningEnvironments = env.FindRunningEnvironments();
     //if (runningEnvironments.Count() == 0)
     //    throw new TwinCatException("No running TwinCAT XAE Shell environment was found on the system. Please start a new instance of TwinCAT XAE Shell and try again.");
@@ -155,26 +155,53 @@ try
     #endregion
 
     #region Testing system config
+    //using TcXaeShellEnvironment env = new(logger);
+    //var solutionFiles = FilesAndPathTools.FindSolutionFiles(options!.WorkDir);
+
+    //var xaeList = env.FindRunningEnvironments();
+    //if (xaeList.Count == 0)
+    //    throw new TwinCatException("No installed TwinCAT XAE Shell was found on the system.");
+    //await env.AttachToEnvironment(xaeList.First());
+
+    //var projects = env.FindProjectsInSolution(solutionFiles.First().SolutionFilePath);
+    //if (projects.Count() == 0)
+    //    throw new TwinCatException("No projects were found in the solution.");
+    //await env.SelectProjectInSolution(projects.First());
+
+    //await env.AddLicenseDongle();
+    //await env.AddTask("TestTask");
+    //await env.AddMotionTask("TestMotionTask");
+    //await env.AddMotionAxis();
+
+    //Console.WriteLine("Done!");
+    //Console.ReadLine();
+    #endregion
+
+    #region Test TcUnitRunner
     using TcXaeShellEnvironment env = new(logger);
-    var solutionFiles = FilesAndPathTools.FindSolutionFiles(options!.WorkDir);
 
-    var xaeList = env.FindRunningEnvironments();
-    if (xaeList.Count == 0)
-        throw new TwinCatException("No installed TwinCAT XAE Shell was found on the system.");
-    await env.AttachToEnvironment(xaeList.First());
+    // 1. Find running TcXaeShell instances and let the user pick one
+    var runningEnvironments = env.FindRunningEnvironments();
+    if (runningEnvironments.Count == 0)
+        throw new TwinCatException("No running TwinCAT XAE Shell environment was found on the system. Please start a new instance of TwinCAT XAE Shell and try again.");
 
-    var projects = env.FindProjectsInSolution(solutionFiles.First().SolutionFilePath);
-    if (projects.Count() == 0)
-        throw new TwinCatException("No projects were found in the solution.");
-    await env.SelectProjectInSolution(projects.First());
+    var selectedEnvironment = SelectFromList("Select a running environment", runningEnvironments);
+    await env.AttachToEnvironment(selectedEnvironment);
 
-    await env.AddLicenseDongle();
-    await env.AddTask("TestTask");
-    await env.AddMotionTask("TestMotionTask");
-    await env.AddMotionAxis();
+    if (string.IsNullOrWhiteSpace(options.SolutionPath))
+        throw new TwinCatException($"No solution is open in '{selectedEnvironment}'.");
 
-    Console.WriteLine("Done!");
-    Console.ReadLine();
+    var projects = env.FindProjectsInSolution(options.SolutionPath);
+    if (projects.Count == 0)
+        throw new TwinCatException($"No projects were found in solution '{options.SolutionPath}'.");
+
+    var selectedProject = SelectFromList("Select a project", projects, Path.GetFileName);
+    await env.SelectProjectInSolution(selectedProject);
+
+    // 3. Download to the target, start TwinCAT and wait for TcUnit to finish
+    env.DownloadToPlc();
+    env.StartTwinCat();
+    await env.WaitForUnitTestToDone();
     #endregion
 
     logger.LogInformation("- - - - - Finished building - - - - -");
@@ -217,4 +244,26 @@ catch (Exception ex)
 finally
 {
     logger.LogInformation("Application is closing...");
+}
+
+/// <summary>
+/// Prints a numbered list to the console and reads the user's choice until a valid index is entered.
+/// </summary>
+static T SelectFromList<T>(string prompt, IReadOnlyList<T> items, Func<T, string>? display = null)
+{
+    display ??= item => item?.ToString() ?? string.Empty;
+
+    while (true)
+    {
+        Console.WriteLine();
+        Console.WriteLine($"{prompt}:");
+        for (int i = 0; i < items.Count; i++)
+            Console.WriteLine($"  [{i}] {display(items[i])}");
+        Console.Write($"Enter number [0-{items.Count - 1}]: ");
+
+        if (int.TryParse(Console.ReadLine(), out int index) && index >= 0 && index < items.Count)
+            return items[index];
+
+        Console.WriteLine("Invalid selection, try again.");
+    }
 }

@@ -620,24 +620,49 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     /// <exception cref="TwinCatException">Thrown when the timeout expires before tests complete.</exception>
     public async Task WaitForUnitTestToDone(int timeoutMs = 60_000)
     {
-        log.LogInformation("- - - - - Waiting on unit tests - - - - -");
-        int pollIntervalMs = 2_000;
-        var startTime = DateTime.UtcNow;
+        var result = await WaitForUnitTestResults(timeoutMs);
+        if (!result.Finished)
+            throw new TwinCatException($"Timeout waiting for unit test to be done after {timeoutMs / 1000} seconds");
 
-        while (true)
+        log.LogInformation("Results from unit tests:");
+        tcUnitRunner.PrintResults(result);
+    }
+
+    /// <summary>
+    /// Polls the Error List until TcUnit reports that all tests have finished (or the timeout expires)
+    /// and returns the parsed results. Does not throw on timeout; check <see cref="UnitTestResult.Finished"/>.
+    /// </summary>
+    /// <param name="timeoutMs">Maximum time to wait in milliseconds.</param>
+    /// <param name="settleMs">Extra time to wait after the "finished" message so the last results are printed.</param>
+    public async Task<UnitTestResult> WaitForUnitTestResults(int timeoutMs = 60_000, int settleMs = 5_000)
+    {
+        log.LogInformation("- - - - - Waiting on unit tests - - - - -");
+        const int pollIntervalMs = 2_000;
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        bool finished = false;
+        while (stopwatch.ElapsedMilliseconds <= timeoutMs)
         {
             if (await tcUnitRunner.IsTcUnitDone())
+            {
+                finished = true;
                 break;
-
-            if ((DateTime.UtcNow - startTime).TotalMilliseconds > timeoutMs)
-                throw new TwinCatException($"Timeout waiting for unit test to be done after {timeoutMs / 1000} seconds");
-
+            }
             await Task.Delay(pollIntervalMs);
         }
 
-        log.LogInformation("Results from unit tests:");
-        await tcUnitRunner.PrintResultsFromUnitTest();
+        if (finished)
+            await Task.Delay(settleMs); // Extra wait for the last results to be printed
+        else
+            log.LogWarning("Timeout waiting for unit test to be done after {seconds} seconds", timeoutMs / 1000);
+
+        return await tcUnitRunner.GetResults();
     }
+
+    /// <summary>
+    /// Reads the current TcUnit results from the Error List without waiting.
+    /// </summary>
+    public Task<UnitTestResult> GetUnitTestResults() => tcUnitRunner.GetResults();
     #endregion
 
     /// <summary>

@@ -1101,7 +1101,7 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
                         results.Add(new ErrorListEntry
                         {
                             Index = i,
-                            Severity = ErrorListEntry.FromVs(item.ErrorLevel),
+                            Severity = ToSeverity(item.ErrorLevel),
                             Description = SafeGet(() => item.Description) ?? string.Empty,
                             FileName = SafeGet(() => item.FileName) ?? string.Empty,
                             Line = SafeGet(() => item.Line),
@@ -1129,6 +1129,13 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
             try { return getter(); }
             catch (COMException) { return default; }
         }
+        // Maps the DTE build error level to the COM-free ErrorListSeverity
+        static ErrorListSeverity ToSeverity(vsBuildErrorLevel level) => level switch
+        {
+            vsBuildErrorLevel.vsBuildErrorLevelHigh => ErrorListSeverity.Error,
+            vsBuildErrorLevel.vsBuildErrorLevelMedium => ErrorListSeverity.Warning,
+            _ => ErrorListSeverity.Message
+        };
     }
 
     /// <summary>

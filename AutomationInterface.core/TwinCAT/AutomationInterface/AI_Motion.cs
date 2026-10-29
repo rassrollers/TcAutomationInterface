@@ -3,11 +3,11 @@
 namespace AutomationInterface.core;
 
 /// <summary>
-/// Partial class of Automation Interface containing MOTION management code.
+/// Partial class of Automation Interface containing MOTION axis management code.
 /// </summary>
 public partial class AutomationInterface
 {
-    /// <summary>
+    // <summary>
     /// Adds a motion task to the current XAE project's NC configuration.
     /// </summary>
     /// <param name="taskName">The name of the motion task.</param>
@@ -20,7 +20,10 @@ public partial class AutomationInterface
             throw new AutomationInterfaceException("Adding Motion tasks is only supported for XAE projects");
 
         log.LogDebug("Adding a new Motion task named: {name}", taskName);
-        ncConfig!.CreateChild(taskName, 1, null, null);
+        Retry(() =>
+        {
+            ncConfig!.CreateChild(taskName, 1, null, null);
+        }, actionName: "AddMotionTask", maxRetries: 5, delayMilliseconds: 1000);
     }
 
     /// <summary>
@@ -35,9 +38,12 @@ public partial class AutomationInterface
         else if (projectType != TcProjectExtension.tsproj)
             throw new AutomationInterfaceException("Adding Motion axes is only supported for XAE projects");
 
-        var ncName = ncConfig.Child[1].Name;
-        var axes = sysManager.LookupTreeItem($"{TreeItems.NC_CONFIG}^{ncName}^Axes");
-        axes.CreateChild(axisName, 1, null, null);
+        Retry(() =>
+        {
+            var ncName = ncConfig!.Child[1].Name;
+            var axes = sysManager!.LookupTreeItem($"{TreeItems.NC_CONFIG}^{ncName}^Axes");
+            axes.CreateChild(axisName, 1, null, null);
+        }, actionName: "AddMotionAxis", maxRetries: 5, delayMilliseconds: 1000);
     }
 
     /// <summary>

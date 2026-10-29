@@ -23,10 +23,12 @@ public class AutomationInterfaceSettings
 /// </summary>
 public enum BuildType
 {
+    /// <summary>No build type was specified.</summary>
+    None = 0,
     /// <summary>Build and save as a TwinCAT library file.</summary>
-    Library,
+    Library = 1,
     /// <summary>Build as a deployable TwinCAT project.</summary>
-    Project
+    Project = 2
 }
 
 /// <summary>

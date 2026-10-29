@@ -72,7 +72,10 @@ public partial class AutomationInterface
         log.LogInformation("Setting up TcUnit library to publish to {path}", resultPath);
         PlcProjectXml libXml = ExtractLibraryXml();
         libXml.SetTcUnitPublish(resultPath);
-        plcLibraryReference!.ConsumeXml(libXml.ToXmlString());
+        Retry(() =>
+        {
+            plcLibraryReference!.ConsumeXml(libXml.ToXmlString());
+        }, actionName: "LibraryXmlConsume", maxRetries: 5, delayMilliseconds: 1000);
         await vsEnv.SaveAll();
     }
 
@@ -96,7 +99,7 @@ public partial class AutomationInterface
                 }
                 catch (IOException ex) when (ex.Message.Contains("Library already exists"))
                 {
-                    log.LogInformation("Library {library} already exists, skipping installation", libName);
+                    log.LogDebug("Library {library} already exists, skipping installation", libName);
                 }
             }, $"Installing_Library_{libName}");
         }

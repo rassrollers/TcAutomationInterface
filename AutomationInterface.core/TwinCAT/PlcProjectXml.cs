@@ -134,29 +134,52 @@ internal class PlcProjectXml
 
     /// <summary>
     /// Configures the TcUnit library parameters to enable result publishing to the specified file path.
-    /// Sets <c>XUNITENABLEPUBLISH</c> to <c>TRUE</c> and <c>XUNITFILEPATH</c> to the given path.
+    /// Sets <c>GVL_PARAM_TCUNIT.XUNITENABLEPUBLISH</c> to <c>TRUE</c> and <c>GVL_PARAM_TCUNIT.XUNITFILEPATH</c> to the given path.
+    /// Missing <c>&lt;ParameterList&gt;</c> or <c>&lt;Parameter&gt;</c> elements are created.
     /// </summary>
     /// <param name="resultPath">The target file path for TcUnit XML results.</param>
-    /// <exception cref="TcXmlException">Thrown when the TcUnit parameters cannot be found.</exception>
+    /// <exception cref="TcXmlException">Thrown when the TcUnit library reference cannot be found.</exception>
     public void SetTcUnitPublish(string resultPath)
     {
         XElement tcUnitLib = GetTcUnitXml();
 
-        XElement? publishEnableParam = tcUnitLib.Descendants("Parameter").FirstOrDefault(parm =>
-            (string?)parm.Element("Name") == "GVL_PARAM_TCUNIT.XUNITENABLEPUBLISH")
-            ?? throw new TcXmlException("Unable to find TcUnit publish enable");
-        XElement? publishEnableValue = publishEnableParam.Element("Value");
-        if (publishEnableValue is null)
-            throw new TcXmlException("Unable to locate TcUnit publish enable value");
-        publishEnableValue.Value = "TRUE";
+        SetLibraryParameter(tcUnitLib, "GVL_PARAM_TCUNIT.XUNITENABLEPUBLISH", "TRUE");
+        SetLibraryParameter(tcUnitLib, "GVL_PARAM_TCUNIT.XUNITFILEPATH", $"'{resultPath}'");
+    }
 
-        XElement? publishPathParam = tcUnitLib.Descendants("Parameter").FirstOrDefault(parm =>
-            (string?)parm.Element("Name") == "GVL_PARAM_TCUNIT.XUNITFILEPATH")
-            ?? throw new TcXmlException("Unable to find TcUnit publish path");
-        XElement? publishPathValue = publishPathParam.Element("Value");
-        if (publishPathValue is null)
-            throw new TcXmlException("Unable to locate TcUnit publish path value");
-        publishPathValue.Value = $"'{resultPath}'";
+    /// <summary>
+    /// Sets a library parameter value, creating the <c>&lt;ParameterList&gt;</c> container and the
+    /// <c>&lt;Parameter&gt;</c> entry if they do not already exist.
+    /// </summary>
+    /// <param name="library">The <c>&lt;Library&gt;</c> element to modify.</param>
+    /// <param name="name">The full parameter name (the <c>&lt;Name&gt;</c> element, e.g. <c>GVL_PARAM_TCUNIT.XUNITENABLEPUBLISH</c>).</param>
+    /// <param name="value">The value to assign (the <c>&lt;Value&gt;</c> element).</param>
+    private static void SetLibraryParameter(XElement library, string name, string value)
+    {
+        XElement? parameterList = library.Element("ParameterList");
+        if (parameterList is null)
+        {
+            parameterList = new XElement("ParameterList");
+            library.Add(parameterList);
+        }
+
+        XElement? parameter = parameterList.Elements("Parameter").FirstOrDefault(parm =>
+            (string?)parm.Element("Name") == name);
+        if (parameter is null)
+        {
+            parameterList.Add(new XElement("Parameter",
+                new XElement("Name", name),
+                new XElement("Value", value)));
+            return;
+        }
+
+        XElement? valueElement = parameter.Element("Value");
+        if (valueElement is null)
+        {
+            parameter.Add(new XElement("Value", value));
+            return;
+        }
+        valueElement.Value = value;
     }
 
     /// <summary>

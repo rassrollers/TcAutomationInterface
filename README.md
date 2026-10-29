@@ -25,12 +25,13 @@ AutomationInterface.core:
     * VisualStudioEnvironment     - COM-based DTE wrapper with retry logic
     * DteHelper, IOleMessageFilter, MessageFilter, StaComHost, ErrorItemsEnumerable - COM and STA threading helpers for DTE access
 * TwinCAT/
-    * AutomationInterface (partial class)
+    * AutomationInterface/        - The AutomationInterface partial class, one file per concern
         * AI_Base                 - System manager, configuration, and runtime control
         * AI_LibraryRepo          - Library reference management and installation
         * AI_Motion               - NC/Motion task, axes and reload via Solution Explorer
         * AI_PlcProject           - PLC project references, version injection, library export
         * AI_ProgramItems         - Program item management (POU, DUT, GVL, etc.)
+        * AI_Settings               - AutomationInterfaceSettings, TreeItems, and enum definitions
         * AI_System               - System setup (License, Task, etc.)
         * AI_Templates            - Templates for solution and projects
     * TcProjectXml                - .tsproj XML manipulation (version, variants, licenses)

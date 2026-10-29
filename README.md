@@ -68,8 +68,11 @@ If you don't want the IDE to be in focus, you should not use the `--UserControl`
 
 | Option | Short | Required | Description |
 |--------|-------|----------|-------------|
-| `--SolutionName` | `-s` | No | Solution filename to locate in the working directory |
+| `--SolutionName` | `-s` | Yes | Solution filename to locate in the working directory |
 | `--WorkDir` | `-w` | Yes | Root directory containing the `.git` folder |
+| `--ProjectName` | `-p` | No | Project name to select from the solution |
+| `--PlatformArchitecture` | `-a` | No | TwinCAT target platform (for example, `TwinCAT RT (x64)`) |
+| `--TargetNetId` | `-n` | No | AMS Net ID of the TwinCAT target |
 | `--Type` | `-t` | No | Build type: `Library` or `Project` |
 | `--UiXae` | `-u` | No | Show the TcXaeShell UI (default: `false`) |
 | `--UserControl` | `-c` | No | Enable user control of the UI (default: `false`) |

@@ -77,7 +77,11 @@ public static class AppTools
         logger.LogInformation($"Build type: {opt.Type.ToString()}");
         logger.LogInformation($"Working directory: {opt.WorkDir}");
         logger.LogInformation($"Solution name: {opt.SolutionName} at {opt.SolutionPath}");
+        logger.LogInformation($"Project name: {opt.ProjectName}");
+        logger.LogInformation($"Platform architecture: {opt.PlatformArchitecture}");
+        logger.LogInformation($"Target NetID: {opt.TargetNetId}");
         logger.LogInformation($"Show XAE UI: {opt.UiXae}");
         logger.LogInformation($"User Control: {opt.UserControl}");
+        logger.LogInformation($"Unit test result path: {opt.UnitTestResultPath}");
     }
 }

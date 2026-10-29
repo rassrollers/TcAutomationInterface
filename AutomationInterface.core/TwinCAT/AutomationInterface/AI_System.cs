@@ -1,6 +1,4 @@
 ﻿using Microsoft.Extensions.Logging;
-using System.Xml.Linq;
-using TCatSysManagerLib;
 
 namespace AutomationInterface.core;
 
@@ -22,7 +20,10 @@ public partial class AutomationInterface
             throw new AutomationInterfaceException("license dongle setup is only supported for XAE projects");
 
         log.LogDebug("Adding a license dongle named: {name}", name);
-        ITcSmTreeItem usbDongle = realTimeLicense!.CreateChild(name, 0, null, null);
+        Retry(() =>
+        {
+            realTimeLicense!.CreateChild(name, 0, null, null);
+        }, actionName: "AddLicenseDongle", maxRetries: 5, delayMilliseconds: 1000);
     }
 
     /// <summary>
@@ -30,7 +31,7 @@ public partial class AutomationInterface
     /// </summary>
     /// <param name="name">The name of the real-time task.</param>
     /// <exception cref="AutomationInterfaceException">Thrown when the additional tasks reference is unavailable or the project is not an XAE project.</exception>
-    internal void AddTask(string name)
+    internal void AddRtTask(string name)
     {
         if (realTimeAdditionalTasks is null)
             throw new AutomationInterfaceException("RealTimeAdditionalTasks reference was not set");
@@ -38,6 +39,9 @@ public partial class AutomationInterface
             throw new AutomationInterfaceException("Adding tasks is only supported for XAE projects");
 
         log.LogDebug("Adding a new task named: {name}", name);
-        ITcSmTreeItem newTask = realTimeAdditionalTasks!.CreateChild(name, 1, null, null);
+        Retry(() =>
+        {
+            realTimeAdditionalTasks!.CreateChild(name, 1, null, null);
+        }, actionName: "AddRtTask", maxRetries: 5, delayMilliseconds: 1000);
     }
 }

@@ -1,5 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using TCatSysManagerLib;
 
 namespace AutomationInterface.core;

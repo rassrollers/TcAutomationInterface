@@ -151,7 +151,7 @@ public partial class AutomationInterface : IDisposable
     /// <param name="actionName">A descriptive name for the action (used in log messages).</param>
     /// <param name="maxRetries">The maximum number of retry attempts.</param>
     /// <param name="delayMilliseconds">The delay in milliseconds between retries.</param>
-    private void Retry(RetryAction action, string actionName, int maxRetries = 5, int delayMilliseconds = 2000)
+    private void Retry(RetryAction action, string actionName, int maxRetries = 10, int delayMilliseconds = 2000)
     {
         int attempt = 0;
         Exception? lastException = null;
@@ -167,6 +167,7 @@ public partial class AutomationInterface : IDisposable
             }
             catch (COMException ex) when (IsRetryable(ex))
             {
+
                 attempt++;
                 log.LogDebug("[AutomationInterface] Failed to execute action: {action} due to {error}, retrying {attempt}/{maxRetries}",
                     actionName, ex.Message, attempt, maxRetries);
@@ -178,13 +179,13 @@ public partial class AutomationInterface : IDisposable
             {
                 string? errorName = Enum.GetName(typeof(TCSYSMANAGERHRESULTS), ex.HResult);
                 if (ex.HResult == CHILD_NOT_FOUND)
-                    log.LogDebug("[AutomationInterface] Child item not found during action: {action} - {message}", 
+                    log.LogDebug("[AutomationInterface] Child item not found during action: {action} - {message}",
                         actionName, ex.Message);
                 else if (errorName != null)
-                    log.LogError("[AutomationInterface] COM Exception occurred: {error} (0x{HResult:X}) - {message}", 
+                    log.LogError("[AutomationInterface] COM Exception occurred: {error} (0x{HResult:X}) - {message}",
                         errorName, ex.HResult, ex.Message);
                 else
-                    log.LogError("[AutomationInterface] Unknown COM Exception: 0x{HResult:X} - {message}", 
+                    log.LogError("[AutomationInterface] Unknown COM Exception: 0x{HResult:X} - {message}",
                         ex.HResult, ex.Message);
                 throw;
             }
@@ -388,10 +389,10 @@ public partial class AutomationInterface : IDisposable
     /// Get all the available project variants in the current project
     /// </summary>
     /// <returns>A string list of available project variants</returns>
-    public async Task<List<string>> GetAvailableProjectVariants()
+    public List<string> GetAvailableProjectVariants()
     {
         string variants = "";
-        await vsEnv.RunOnStaThread(() => variants = sysManager!.ProjectVariantConfig);
+        vsEnv.RunOnStaThread(() => variants = sysManager!.ProjectVariantConfig).GetAwaiter().GetResult();
         XDocument doc = XDocument.Parse(variants);
 
         List<string> names = doc
@@ -406,16 +407,16 @@ public partial class AutomationInterface : IDisposable
     /// </summary>
     /// <param name="variantName"></param>
     /// <returns>True if successful</returns>
-    public async Task<bool> SetProjectVariant(string variantName)
+    public bool SetProjectVariant(string variantName)
     {
         log.LogInformation("Setting project variant: {variantName}", variantName);
-        var variants = await GetAvailableProjectVariants();
+        var variants = GetAvailableProjectVariants();
         if (!variants.Contains(variantName))
         {
             log.LogError($"The requested variant '{variantName}' was not found in the project variants.");
             return false;
         }
-        await vsEnv.RunOnStaThread(() => sysManager!.CurrentProjectVariant = variantName);
+        vsEnv.RunOnStaThread(() => sysManager!.CurrentProjectVariant = variantName).GetAwaiter().GetResult();
         return true;
     }
 
@@ -423,11 +424,11 @@ public partial class AutomationInterface : IDisposable
     /// Gets the currently active project variant name.
     /// </summary>
     /// <returns>The current project variant string.</returns>
-    public async Task<string> GetProjectVariant()
+    public string GetProjectVariant()
     {
-        string currentVariant = "";
-        await vsEnv.RunOnStaThread(() => currentVariant = sysManager!.CurrentProjectVariant);
-        return currentVariant;
+        string variant = "";
+        vsEnv.RunOnStaThread(() => variant = sysManager!.CurrentProjectVariant).GetAwaiter().GetResult();
+        return variant;
     }
     #endregion
 
@@ -503,13 +504,13 @@ public partial class AutomationInterface : IDisposable
     /// </summary>
     /// <returns>Return TRUE if TwinCAT system is started</returns>
     /// <exception cref="AutomationInterfaceException">System manager was not set</exception>
-    internal async Task<bool> IsTargetTcSysRunning()
+    internal bool IsTargetTcSysRunning()
     {
         if (sysManager is null)
             throw new AutomationInterfaceException("System manager was not set");
-        
+
         bool isRunning = false;
-        await vsEnv.RunOnStaThread(() => isRunning = sysManager.IsTwinCATStarted());
+        vsEnv.RunOnStaThread(() => isRunning = sysManager.IsTwinCATStarted()).GetAwaiter().GetResult();
         return isRunning;
     }
     #endregion

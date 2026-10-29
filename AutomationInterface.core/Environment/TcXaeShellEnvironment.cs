@@ -348,6 +348,9 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     /// <param name="platform">The platform of the target.</param>
     public void ConfigureTarget(string netId, string platform)
     {
+        if (tcState < TcEnvironmenState.ProjectSelected)
+            throw new TwinCatException("Cannot configure target because no project is selected");
+
         automationInterface.SetPlatform(platform);
         automationInterface.SetTarget(netId);
         automationInterface.GenerateBootProject();
@@ -361,6 +364,9 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     /// <param name="commitTime">Commit timestamp to inject.</param>
     public void InjectGitVersion(string version, string commitHash, string commitTime)
     {
+        if (tcState < TcEnvironmenState.ProjectSelected)
+            throw new TwinCatException("Cannot inject Git version because no project is selected");
+
         ValidateVersionString(version);
 
         log.LogInformation("- - - - - Git injection - - - - -");
@@ -372,7 +378,7 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     /// Gets the list of available project variant names in the current TwinCAT project.
     /// </summary>
     /// <returns>A list of variant name strings.</returns>
-    public Task<List<string>> GetAvailableProjectVariant()
+    public List<string> GetAvailableProjectVariant()
     {
         return automationInterface.GetAvailableProjectVariants();
     }
@@ -381,9 +387,9 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     /// Sets the active project variant by name.
     /// </summary>
     /// <param name="variant">The variant name to activate.</param>
-    public async Task SetProjectVariant(string variant)
+    public void SetProjectVariant(string variant)
     {
-        await automationInterface.SetProjectVariant(variant);
+        automationInterface.SetProjectVariant(variant);
     }
 
     /// <summary>
@@ -500,7 +506,7 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     /// Checks whether the target TwinCAT system runtime is currently running.
     /// </summary>
     /// <returns><see langword="true"/> if the target TwinCAT system is started; otherwise <see langword="false"/>.</returns>
-    public Task<bool> IsTargetTcSysRunning()
+    public bool IsTargetTcSysRunning()
     {
         return automationInterface.IsTargetTcSysRunning();
     }
@@ -543,7 +549,7 @@ public class TcXaeShellEnvironment : IDisposable, IAsyncDisposable
     public async Task AddTask(string name)
     {
         log.LogInformation("Adding task: {name}", name);
-        automationInterface.AddTask(name);
+        automationInterface.AddRtTask(name);
         await visualStudioEnvironment.SaveAll();
     }
     #endregion

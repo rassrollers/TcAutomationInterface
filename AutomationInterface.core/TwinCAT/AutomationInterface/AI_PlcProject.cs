@@ -1,5 +1,4 @@
 ﻿using Microsoft.Extensions.Logging;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using TCatSysManagerLib;
@@ -160,8 +159,11 @@ public partial class AutomationInterface
     /// </summary>
     internal void GenerateBootProject()
     {
-        plcProject!.BootProjectAutostart = true;
-        //plcProject!.GenerateBootProject(bActivate: true);
+        Retry(() =>
+        {
+            plcProject!.BootProjectAutostart = true;
+            //plcProject!.GenerateBootProject(bActivate: true);
+        }, actionName: "GenerateBootProject", maxRetries: 5, delayMilliseconds: 1000);
     }
 
     /// <summary>
@@ -170,7 +172,12 @@ public partial class AutomationInterface
     /// <returns>The PLC project name.</returns>
     internal string GetProjectName()
     {
-        return plcProjectTreeItem!.Name;
+        string name = string.Empty;
+        Retry(() =>
+        {
+            name = plcProjectTreeItem!.Name;
+        }, actionName: "GetProjectName", maxRetries: 5, delayMilliseconds: 1000);
+        return name;
     }
     #endregion
 
@@ -206,8 +213,7 @@ public partial class AutomationInterface
             CreateProgramItem("VERSION_INFO", ProgramItemsTypes.Struct.ToString(), "Version");
 
         ITcPlcDeclaration versionDecl = ExtractPlcDeclaration("Version^VERSION_INFO");
-        string declarationString = versionDecl.DeclarationText;
-        declarationString = VERSION_INFO_DEFAULT;
+        string declarationString = VERSION_INFO_DEFAULT;
         log.LogDebug("Version file before inject (escaped): {declaration}", declarationString);
 
         Dictionary<string, string> injectData = new()
@@ -232,11 +238,13 @@ public partial class AutomationInterface
         }
 
         // Write the injected data to version POU
+        string injectedDeclaration = string.Empty;
         Retry(() =>
         {
             versionDecl.DeclarationText = stringBuilder.ToString().TrimEnd('\r', '\n');
+            injectedDeclaration = versionDecl.DeclarationText;
         }, actionName: "VersionInfoFileInject", maxRetries: 5, delayMilliseconds: 1000);
-        log.LogDebug("Version file after inject:\n{declaration}", versionDecl.DeclarationText);
+        log.LogDebug("Version file after inject:\n{declaration}", injectedDeclaration);
     }
 
     /// <summary>
@@ -278,7 +286,10 @@ public partial class AutomationInterface
         filename = Regex.Replace(filename, @"\s+", "_");
         string fullDestination = Path.Join(outputDir, filename);
         log.LogInformation("Saving library {file} at {destination}", filename, Path.GetDirectoryName(fullDestination));
-        plcIecProject!.SaveAsLibrary(fullDestination);
+        Retry(() =>
+        {
+            plcIecProject!.SaveAsLibrary(fullDestination);
+        }, actionName: "SaveAsLibrary", maxRetries: 5, delayMilliseconds: 1000);
     }
 
     /// <summary>

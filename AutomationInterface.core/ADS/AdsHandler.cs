@@ -128,4 +128,72 @@ public class AdsHandler : IDisposable
             return string.Empty;
         }
     }
+
+    /// <summary>
+    /// Reads a file from the target through the ADS file API of the system service.
+    /// The handler must be connected to port 10000 (<see cref="AmsPort.SystemService"/>).
+    /// </summary>
+    /// <param name="remotePath">The path on the target, e.g. <c>/home/Administrator/tcUnitResults.xml</c>.</param>
+    /// <returns>The file content.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when not connected to the system service, or when the file exceeds the maximum supported size.</exception>
+    /// <exception cref="TwinCatException">Thrown when the target rejects the request, e.g. the file does not exist or access is denied.</exception>
+    public byte[] ReadFile(string remotePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(remotePath);
+        EnsureConnectedToSystemService();
+
+        try
+        {
+            var content = new AdsFileAccess(adsClient).ReadAllBytes(remotePath);
+            log.LogInformation("Read {bytes} byte(s) from '{path}' on the target", content.Length, remotePath);
+            return content;
+        }
+        catch (AdsErrorException ex)
+        {
+            throw new TwinCatException($"Failed to read '{remotePath}' from the target. ADS return code: {ex.ErrorCode}", ex);
+        }
+    }
+
+    /// <summary>
+    /// Downloads a file from the target to the local file system.
+    /// </summary>
+    /// <param name="remotePath">The path on the target.</param>
+    /// <param name="localPath">The local file to write, or a directory in which the remote file name is used. An existing file is overwritten.</param>
+    /// <returns>The full path of the written local file.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when not connected to the system service, or when the file exceeds the maximum supported size.</exception>
+    /// <exception cref="TwinCatException">Thrown when the target rejects the request, e.g. the file does not exist or access is denied.</exception>
+    public string DownloadFile(string remotePath, string localPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(localPath);
+
+        byte[] content = ReadFile(remotePath);
+
+        string fullPath = Path.GetFullPath(localPath);
+        if (Directory.Exists(fullPath) || localPath.EndsWith(Path.DirectorySeparatorChar) || localPath.EndsWith(Path.AltDirectorySeparatorChar))
+            fullPath = Path.Combine(fullPath, RemoteFileName(remotePath));
+
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        File.WriteAllBytes(fullPath, content);
+        log.LogInformation("Downloaded '{remote}' to '{local}'", remotePath, fullPath);
+        return fullPath;
+    }
+
+    private void EnsureConnectedToSystemService()
+    {
+        if (!IsConnected())
+            throw new InvalidOperationException("Not connected to any TwinCAT system.");
+
+        int port = adsClient.Address.Port;
+        if (port != (int)AmsPort.SystemService)
+            throw new InvalidOperationException($"File access requires a connection to the system service (port {(int)AmsPort.SystemService}), but the handler is connected to port {port}.");
+    }
+
+    private static readonly char[] RemotePathSeparators = ['/', '\\'];
+
+    /// <summary>Gets the file name of a target path, whether it uses '/' (TwinCAT/BSD) or '\' (Windows) separators.</summary>
+    private static string RemoteFileName(string remotePath)
+    {
+        int separator = remotePath.LastIndexOfAny(RemotePathSeparators);
+        return separator >= 0 ? remotePath[(separator + 1)..] : remotePath;
+    }
 }

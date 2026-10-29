@@ -5,8 +5,9 @@ namespace AutomationInterface.core;
 
 /// <summary>
 /// Implements <see cref="IOleMessageFilter"/> to handle COM call rejections and retries
-/// when communicating with the Visual Studio DTE. Each STA thread must register its own filter
-/// via <see cref="Register"/> before making COM calls, and revoke it via <see cref="Revoke"/> on cleanup.
+/// when communicating with the Visual Studio DTE. The filter is per-thread: <see cref="StaComHost"/>
+/// registers it via <see cref="Register"/> when its STA thread starts and revokes it via <see cref="Revoke"/>
+/// when the thread exits, so callers dispatching through the host do not register it themselves.
 /// </summary>
 public class MessageFilter : IOleMessageFilter
 {
@@ -16,16 +17,28 @@ public class MessageFilter : IOleMessageFilter
     public static void Register()
     {
         IOleMessageFilter newFilter = new MessageFilter();
-        CoRegisterMessageFilter(newFilter, out _);
+        int hr = CoRegisterMessageFilter(newFilter, out _);
+
+        // Message filters only exist in single-threaded apartments; on an MTA thread this returns
+        // CO_E_NOT_SUPPORTED. Fail loudly instead of silently running without busy-call retries.
+        if (hr < 0)
+            throw new InvalidOperationException(
+                $"Failed to register the OLE message filter on thread {System.Environment.CurrentManagedThreadId} " +
+                $"({Thread.CurrentThread.GetApartmentState()}): 0x{hr:X8}. The filter must be registered on the STA COM host thread.",
+                Marshal.GetExceptionForHR(hr));
     }
 
     /// <summary>
     /// Revokes the currently registered message filter on the current thread.
     /// </summary>
-    public static void Revoke()
+    /// <returns>
+    /// <c>true</c> if the filter was revoked; <c>false</c> if COM reported a failure
+    /// (typically because this is not the STA thread the filter was registered on).
+    /// </returns>
+    public static bool Revoke()
     {
-        IOleMessageFilter? oldFilter = null;
-        CoRegisterMessageFilter(null, out oldFilter);
+        int hr = CoRegisterMessageFilter(null, out _);
+        return hr >= 0;
     }
 
     /// <summary>
@@ -83,5 +96,5 @@ public class MessageFilter : IOleMessageFilter
 
     // Implement the IOleMessageFilter interface.
     [DllImport("Ole32.dll")]
-    private static extern int CoRegisterMessageFilter(IOleMessageFilter? newFilter, out IOleMessageFilter oldFilter);
+    private static extern int CoRegisterMessageFilter(IOleMessageFilter? newFilter, out IOleMessageFilter? oldFilter);
 }

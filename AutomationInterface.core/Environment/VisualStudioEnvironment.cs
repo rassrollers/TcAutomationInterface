@@ -34,6 +34,7 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
     private bool isAttached = false; // Track if we attached to an existing instance
     private readonly ILogger log;
     private volatile bool isDteHealthy = true;
+    private int? dteProcessId; // devenv.exe PID, used as a fallback to force-kill a hung instance on close
 
     #region Class initialization and disposal
     /// <summary>
@@ -96,173 +97,251 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Releases this environment's COM references without closing the DTE instance.
-    /// The STA host remains available so another DTE can be attached afterward.
+    /// Performs the actual cleanup of all COM references (build events, solution build, solution,
+    /// project, and DTE). Must be called on the STA thread.
     /// </summary>
-    /// <returns>A task representing the detach operation.</returns>
+    public void CloseCore()
+    {
+        log.LogInformation("Closing the Visual Studio Development Tools Environment (DTE)...");
+        ReleaseSolutionReferences();
+
+        if (vsDte is not null)
+        {
+            bool quitSucceeded = isAttached; // nothing to quit if we attached to someone else's instance
+            try
+            {
+                // Only call Quit if we created this instance, not if we attached to it
+                if (!isAttached)
+                {
+                    vsDte.Quit();
+                    quitSucceeded = true;
+                }
+            }
+            catch (COMException ex) when (ex.HResult == unchecked((int)0x800706BA))
+            {
+                log.LogWarning("DTE already terminated (RPC server unavailable)");
+                quitSucceeded = true;
+            }
+            catch (COMException ex)
+            {
+                log.LogWarning(ex, "COM Exception while quitting vsDte: 0x{HResult:X}", ex.HResult);
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(ex, "Unexpected exception while quitting vsDte");
+            }
+
+            // Only force-kill if devenv is genuinely hung (not responding); a responsive process
+            // that failed Quit() is most likely still busy/initializing and may finish on its own -
+            // killing it here just destroys in-progress work for no benefit.
+            if (!isAttached && dteProcessId is int pid)
+            {
+                bool exitedGracefully = false;
+                try
+                {
+                    using var process = System.Diagnostics.Process.GetProcessById(pid);
+                    log.LogDebug("Waiting for devenv.exe (PID {Pid}) to exit after Quit()...", pid);
+                    // Wait for 10 seconds for VS and TwinCAT to shut down gracefully
+                    exitedGracefully = process.WaitForExit(10000);
+                }
+                catch (ArgumentException)
+                {
+                    exitedGracefully = true;
+                }
+
+                // If the process is still running after Quit() and the wait, we assume it is hung and force-kill it.
+                if (!exitedGracefully)
+                {
+                    log.LogWarning("devenv.exe (PID {Pid}) stalled during graceful shutdown. Forcing termination...", pid);
+                    TryKillProcess(pid);
+                }
+                else
+                {
+                    log.LogDebug("devenv.exe (PID {Pid}) terminated successfully.", pid);
+                }
+            }
+
+            try
+            {
+                Marshal.FinalReleaseComObject(vsDte);
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(ex, "Exception while releasing vsDte COM object");
+            }
+            finally
+            {
+                vsDte = null;
+                dteProcessId = null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Detaches from the current DTE instance without quitting it: unsubscribes build events,
+    /// releases all COM references (solution, solution build, project, DTE).
+    /// The devenv.exe process keeps running. After this call the environment can attach to another instance
+    /// or create a new one. Marshals the cleanup to the STA host thread.
+    /// </summary>
+    /// <returns>A <see cref="Task"/> representing the asynchronous detach operation.</returns>
     internal Task DetachAsync()
     {
-        if (isClosed)
-            throw new ObjectDisposedException(nameof(VisualStudioEnvironment));
+        lock (this)
+        {
+            if (isClosed)
+                throw new InvalidOperationException("Cannot detach because the Visual Studio environment has been closed.");
+        }
 
         return host.RunAsync(() =>
         {
-            if (vsDte is null)
-                throw new InvalidOperationException("Cannot detach because no DTE instance is attached.");
-
-            vsDte.UserControl = true;
-            CloseCore(quitDte: false);
+            try
+            {
+                DetachCore();
+            }
+            catch (Exception ex)
+            {
+                log.LogError(ex, "Exception during DetachCore execution.");
+                throw;
+            }
         });
     }
 
     /// <summary>
-    /// Performs the actual cleanup of all COM references (build events, solution build, solution,
-    /// project, and DTE) and revokes the OLE message filter. Must be called on the STA thread.
+    /// Releases all COM references held on the DTE without calling <c>Quit</c>, leaving the instance running.
+    /// Must be called on the STA thread.
     /// </summary>
-    public void CloseCore()
+    private void DetachCore()
     {
-        CloseCore(quitDte: !isAttached);
-    }
-
-    private void CloseCore(bool quitDte)
-    {
-        log.LogInformation(
-            quitDte
-                ? "Closing the Visual Studio Development Tools Environment (DTE)..."
-                : "Detaching from the Visual Studio Development Tools Environment (DTE)...");
-        try
+        if (vsDte is null)
         {
-            // Clean up build events first to prevent callbacks during shutdown
-            if (vsBuildEvent is not null)
-            {
-                try
-                {
-                    vsBuildEvent.OnBuildBegin -= OnBuildBegin;
-                    vsBuildEvent.OnBuildDone -= OnBuildDone;
-                }
-                catch (Exception ex)
-                {
-                    log.LogWarning(ex, "Exception while unregistering build event handlers");
-                }
-                
-                try
-                {
-                    Marshal.FinalReleaseComObject(vsBuildEvent);
-                }
-                catch (Exception ex)
-                {
-                    log.LogWarning(ex, "Exception while releasing vsBuildEvent COM object");
-                }
-                finally
-                {
-                    vsBuildEvent = null;
-                }
-            }
-
-            // Complete any pending build tasks with cancellation
-            lock (buildLock)
-            {
-                if (buildCompletionSource != null)
-                {
-                    log.LogWarning("Cancelling pending build operation during DTE shutdown");
-                    buildCompletionSource.TrySetCanceled();
-                    buildCompletionSource = null;
-                }
-                buildDepth = 0;
-            }
-
-            if (vsSolutionBuild is not null)
-            {
-                try
-                {
-                    Marshal.FinalReleaseComObject(vsSolutionBuild);
-                }
-                catch (Exception ex)
-                {
-                    log.LogWarning(ex, "Exception while releasing vsSolutionBuild COM object");
-                }
-                finally
-                {
-                    vsSolutionBuild = null;
-                }
-            }
-
-            if (vsSolution is not null)
-            {
-                try
-                {
-                    Marshal.FinalReleaseComObject(vsSolution);
-                }
-                catch (Exception ex)
-                {
-                    log.LogWarning(ex, "Exception while releasing vsSolution COM object");
-                }
-                finally
-                {
-                    vsSolution = null;
-                }
-            }
-
-            if (vsProject is not null)
-            {
-                try
-                {
-                    Marshal.FinalReleaseComObject(vsProject);
-                }
-                catch (Exception ex)
-                {
-                    log.LogWarning(ex, "Exception while releasing vsProject COM object");
-                }
-                finally
-                {
-                    vsProject = null;
-                }
-            }
-
-            if (vsDte is not null)
-            {
-                try
-                {
-                    if (quitDte)
-                        vsDte.Quit();
-                }
-                catch (COMException ex) when (ex.HResult == unchecked((int)0x800706BA))
-                {
-                    log.LogWarning("DTE already terminated (RPC server unavailable)");
-                }
-                catch (COMException ex)
-                {
-                    log.LogWarning(ex, "COM Exception while quitting vsDte: 0x{HResult:X}", ex.HResult);
-                }
-                catch (Exception ex)
-                {
-                    log.LogWarning(ex, "Unexpected exception while quitting vsDte");
-                }
-
-                try
-                {
-                    Marshal.FinalReleaseComObject(vsDte);
-                }
-                catch (Exception ex)
-                {
-                    log.LogWarning(ex, "Exception while releasing vsDte COM object");
-                }
-                finally
-                {
-                    vsDte = null;
-                    isAttached = false;
-                }
-            }
+            log.LogDebug("No DTE instance to detach from");
+            return;
         }
-        finally
+
+        log.LogInformation("Detaching from the Visual Studio Development Tools Environment (DTE) without closing it...");
+        ReleaseSolutionReferences();
+
+        if (!isAttached)
         {
+            // An instance created with UserControl = false shuts itself down once the last automation
+            // reference is released. Hand control to the user so devenv.exe survives the detach.
+            log.LogWarning("Detaching from a DTE instance created by this environment. The instance is left running and will not be closed by this environment.");
             try
             {
-                MessageFilter.Revoke();
+                vsDte.UserControl = true;
             }
             catch (Exception ex)
             {
-                log.LogWarning(ex, "Exception while revoking message filter");
+                log.LogWarning(ex, "Exception while setting UserControl on vsDte before detaching. The instance may close itself when released.");
+            }
+        }
+
+        try
+        {
+            Marshal.FinalReleaseComObject(vsDte);
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning(ex, "Exception while releasing vsDte COM object");
+        }
+        finally
+        {
+            vsDte = null;
+            dteProcessId = null;
+            isAttached = false;
+            isDteHealthy = true;
+        }
+    }
+
+    /// <summary>
+    /// Unsubscribes build events, cancels any pending build and releases the solution, solution build,
+    /// build event and project COM references. Does not touch the DTE itself. Must be called on the STA thread.
+    /// </summary>
+    private void ReleaseSolutionReferences()
+    {
+        if (vsBuildEvent is not null)
+        {
+            try
+            {
+                vsBuildEvent.OnBuildBegin -= OnBuildBegin;
+                vsBuildEvent.OnBuildDone -= OnBuildDone;
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(ex, "Exception while unregistering build event handlers");
+            }
+            
+            try
+            {
+                Marshal.FinalReleaseComObject(vsBuildEvent);
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(ex, "Exception while releasing vsBuildEvent COM object");
+            }
+            finally
+            {
+                vsBuildEvent = null;
+            }
+        }
+
+        // Complete any pending build tasks with cancellation
+        lock (buildLock)
+        {
+            if (buildCompletionSource != null)
+            {
+                log.LogWarning("Cancelling pending build operation during DTE shutdown");
+                buildCompletionSource.TrySetCanceled();
+                buildCompletionSource = null;
+            }
+            buildDepth = 0;
+        }
+
+        if (vsSolutionBuild is not null)
+        {
+            try
+            {
+                Marshal.FinalReleaseComObject(vsSolutionBuild);
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(ex, "Exception while releasing vsSolutionBuild COM object");
+            }
+            finally
+            {
+                vsSolutionBuild = null;
+            }
+        }
+
+        if (vsSolution is not null)
+        {
+            try
+            {
+                Marshal.FinalReleaseComObject(vsSolution);
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(ex, "Exception while releasing vsSolution COM object");
+            }
+            finally
+            {
+                vsSolution = null;
+            }
+        }
+
+        if (vsProject is not null)
+        {
+            try
+            {
+                Marshal.FinalReleaseComObject(vsProject);
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(ex, "Exception while releasing vsProject COM object");
+            }
+            finally
+            {
+                vsProject = null;
             }
         }
     }
@@ -327,7 +406,7 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
     /// <param name="delayMilliseconds">Delay in milliseconds between retries.</param>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="maxRetries"/> is less than 1.</exception>
     /// <exception cref="InvalidOperationException">Thrown when all retry attempts are exhausted.</exception>
-    private async Task RetryAsync(Func<Task> action, string actionName, int maxRetries = 5, int delayMilliseconds = 2000)
+    private async Task RetryAsync(Func<Task> action, string actionName, int maxRetries = 10, int delayMilliseconds = 2000)
     {
         if (maxRetries < 1)
             throw new ArgumentOutOfRangeException(nameof(maxRetries), $"maxRetries must be at least 1 for {actionName}");
@@ -344,6 +423,7 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
                 log.LogDebug(
                     "[VisualStudio] {action} rejected by VS, retry {attempt}/{maxRetries}",
                     actionName, attempt, maxRetries);
+                LogDteProcessDiagnostics(actionName);
 
                 if (attempt == maxRetries)
                     throw;
@@ -366,7 +446,7 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
     /// <returns>The result of the function on success.</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="maxRetries"/> is less than 1.</exception>
     /// <exception cref="InvalidOperationException">Thrown when all retry attempts are exhausted.</exception>
-    private async Task<T> RetryAsync<T>(Func<Task<T>> action, string actionName, int maxRetries = 5, int delayMilliseconds = 2000)
+    private async Task<T> RetryAsync<T>(Func<Task<T>> action, string actionName, int maxRetries = 10, int delayMilliseconds = 2000)
     {
         if (maxRetries < 1)
             throw new ArgumentOutOfRangeException(nameof(maxRetries), $"maxRetries must be at least 1 for {actionName}");
@@ -382,6 +462,7 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
                 log.LogDebug(
                     "[VisualStudio] {action} rejected by VS, retry {attempt}/{maxRetries}",
                     actionName, attempt, maxRetries);
+                LogDteProcessDiagnostics(actionName);
 
                 if (attempt == maxRetries)
                     throw;
@@ -416,8 +497,6 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
                 vsDte = DteHelper.GetDteByMoniker(instance.Moniker);
                 isAttached = true;
 
-                MessageFilter.Register();
-
                 vsDte.UserControl = userControl;
                 vsDte.SuppressUI = !openXaeUi;
                 vsDte.ToolWindows.ErrorList.ShowErrors = true;
@@ -441,7 +520,7 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
 
     #region DTE and Solution handling
     /// <summary>
-    /// Creates a DTE2 instance for the specified TcXaeShell version, registers the OLE message filter,
+    /// Creates a DTE2 instance for the specified TcXaeShell version
     /// and configures UI visibility, user control, and error list settings.
     /// </summary>
     /// <param name="tcXaseShellDteVersion">The TcXaeShell DTE ProgID (e.g. <c>TcXaeShell.DTE.15.0</c>).</param>
@@ -453,29 +532,51 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
         // Retrieve the DTE object
         Type? t = Type.GetTypeFromProgID(progID: tcXaseShellDteVersion, throwOnError: true) 
             ?? throw new Exception("Passed visualStudioDteVersion was invalid");
+
+        var pidsBeforeCreate = System.Diagnostics.Process.GetProcesses().Select(p => p.Id).ToHashSet();
+
         // Create an instance of the DTE object
         await host.RunAsync(() =>
         {
-            vsDte = Activator.CreateInstance(type: t) as DTE2 
+            vsDte = Activator.CreateInstance(type: t) as DTE2
             ?? throw new Exception("Failed to create an instance of the visualStudioVersion");
         });
 
         // Mark that we created a new instance (call Quit on dispose)
         isAttached = false;
 
-        // Register a filter to the COM object
-        MessageFilter.Register();
-
-        await host.RunAsync(() =>
+        // The OLE message filter is registered for the lifetime of the STA host thread (see StaComHost),
+        // so busy-call retries already cover the CreateInstance call above and everything below.
+        // A freshly started devenv.exe is still initializing here, so keep the explicit retry as a
+        // second line of defense (it also covers RPC_E_CALL_REJECTED, which the filter does not retry).
+        await RetryAsync(() =>
         {
-            vsDte!.UserControl = userControl; // have devenv.exe (VS environment) automatically close and cleanup when using automation. Hides UI if true.
-            vsDte!.SuppressUI = !openXaeUi;
+            return host.RunAsync(() =>
+            {
+                vsDte!.UserControl = userControl; // have devenv.exe (VS environment) automatically close and cleanup when using automation. Hides UI if true.
+                vsDte!.SuppressUI = !openXaeUi;
 
-            // Make sure all types of errors in the error list are collected
-            vsDte!.ToolWindows.ErrorList.ShowErrors = true;
-            vsDte!.ToolWindows.ErrorList.ShowMessages = true;
-            vsDte!.ToolWindows.ErrorList.ShowWarnings = true;
-        });
+                // Make sure all types of errors in the error list are collected
+                vsDte!.ToolWindows.ErrorList.ShowErrors = true;
+                vsDte!.ToolWindows.ErrorList.ShowMessages = true;
+                vsDte!.ToolWindows.ErrorList.ShowWarnings = true;
+            });
+        }, "Configuring new DTE instance");
+
+        // Resolve the devenv.exe PID for the force-kill fallback and diagnostics. Done after the
+        // configuration above so VS has finished initializing, and retried because a starting VS
+        // answers MainWindow with RPC_E_CALL_REJECTED, which the message filter does not retry.
+        try
+        {
+            dteProcessId = await RetryAsync(() =>
+            {
+                return host.RunAsync(() => GetProcessIdFromDte(vsDte!));
+            }, "Resolving devenv process id");
+        }
+        catch (Exception ex)
+        {
+            log.LogDebug(ex, "Could not determine devenv process id for cleanup fallback");
+        }
     }
 
     /// <summary>
@@ -551,11 +652,11 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
         string tcXaseShellDteVersion = CheckTcXaeShellAvailability(solutionVsVersion);
         await CreateDte(tcXaseShellDteVersion, openXaeUi, userControl);
         await SetSolutionHandler();
-        log.LogInformation("Opening solution: {path}", pathToSolutionFile);
 
         if (beforeOpen is not null)
             await beforeOpen();
 
+        log.LogInformation("Opening solution: {path}", pathToSolutionFile);
         await RetryAsync(() =>
         {
             return host.RunAsync(() => vsSolution!.Open(pathToSolutionFile));
@@ -1129,6 +1230,7 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
             try { return getter(); }
             catch (COMException) { return default; }
         }
+
         // Maps the DTE build error level to the COM-free ErrorListSeverity
         static ErrorListSeverity ToSeverity(vsBuildErrorLevel level) => level switch
         {
@@ -1304,12 +1406,130 @@ public class VisualStudioEnvironment : IDisposable, IAsyncDisposable
         }, "Getting TwinCAT System Manager references");
     }
 
-     /// <summary>
+    /// <summary>
     /// Runs an action on the STA thread that owns the DTE and TwinCAT COM objects.
     /// COM objects such as <c>ITcSysManager15</c> are apartment-bound to this thread; accessing them
     /// from any other thread forces COM to marshal the call across apartments, which is what
     /// surfaces as spurious <c>RPC_E_SERVERCALL_RETRYLATER</c>/busy errors.
     /// </summary>
     internal Task RunOnStaThread(Action action) => host.RunAsync(action);
+
+    /// <summary>
+    /// Resolves the devenv.exe process id owning the given DTE instance's main window, used as a
+    /// fallback to force-kill the process if it later becomes unresponsive to Quit().
+    /// </summary>
+    private static int? GetProcessIdFromDte(DTE2 dte)
+    {
+        IntPtr hwnd = new(dte.MainWindow.HWnd);
+        if (hwnd == IntPtr.Zero)
+            return null;
+
+        GetWindowThreadProcessId(hwnd, out uint pid);
+        return pid == 0 ? null : (int)pid;
+    }
+
+    /// <summary>
+    /// Forcibly terminates a devenv.exe process that failed to respond to <c>Quit()</c>
+    /// (e.g. stuck behind a modal dialog or otherwise hung), so it can't linger and interfere
+    /// with subsequent automation.
+    /// </summary>
+    private void TryKillProcess(int processId)
+    {
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById(processId);
+            if (!process.HasExited)
+            {
+                log.LogWarning("devenv (PID {ProcessId}) did not respond to Quit(); forcibly terminating it", processId);
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit(5000);
+            }
+        }
+        catch (ArgumentException)
+        {
+            // Process already exited
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning(ex, "Failed to forcibly terminate devenv process (PID {ProcessId})", processId);
+        }
+    }
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    /// <summary>
+    /// Logs whether the devenv process is responding and lists its visible top-level window titles,
+    /// to help distinguish a genuinely busy VS from a hung process or one stuck behind a modal dialog.
+    /// </summary>
+    private void LogDteProcessDiagnostics(string context)
+    {
+        if (dteProcessId is not int pid)
+        {
+            log.LogDebug("[VisualStudio] {Context}: no devenv process id captured for diagnostics", context);
+            return;
+        }
+
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById(pid);
+            log.LogDebug(
+                "[VisualStudio] {Context}: devenv PID {Pid} Responding={Responding} MainWindowTitle='{Title}'",
+                context, pid, process.Responding, process.MainWindowTitle);
+
+            var siblingPids = System.Diagnostics.Process.GetProcessesByName(process.ProcessName).Select(p => p.Id).ToList();
+            log.LogDebug(
+                "[VisualStudio] {Context}: {Count} running instance(s) of '{ProcessName}': {Pids}",
+                context, siblingPids.Count, process.ProcessName, string.Join(",", siblingPids));
+
+            // Per-thread wait reasons reveal what a stuck-but-responding process is actually blocked
+            // on (e.g. LpcReply/an RPC reply that never arrives) without needing a debugger.
+            var threadStates = process.Threads
+                .Cast<System.Diagnostics.ProcessThread>()
+                .Select(t => t.ThreadState == System.Diagnostics.ThreadState.Wait
+                    ? $"{t.Id}:{t.ThreadState}/{t.WaitReason}"
+                    : $"{t.Id}:{t.ThreadState}")
+                .ToList();
+            log.LogDebug("[VisualStudio] {Context}: devenv PID {Pid} thread states: {ThreadStates}", context, pid, string.Join(", ", threadStates));
+
+            var titles = new List<string>();
+            EnumWindows((hWnd, _) =>
+            {
+                GetWindowThreadProcessId(hWnd, out uint windowPid);
+                if (windowPid != pid || !IsWindowVisible(hWnd))
+                    return true;
+
+                int length = GetWindowTextLength(hWnd);
+                if (length == 0)
+                    return true;
+
+                var sb = new System.Text.StringBuilder(length + 1);
+                GetWindowText(hWnd, sb, sb.Capacity);
+                titles.Add(sb.ToString());
+                return true;
+            }, IntPtr.Zero);
+
+            if (titles.Count > 0)
+                log.LogDebug("[VisualStudio] {Context}: devenv PID {Pid} visible windows: {Titles}", context, pid, string.Join(" | ", titles));
+        }
+        catch (Exception ex)
+        {
+            log.LogDebug(ex, "[VisualStudio] {Context}: failed to gather devenv process diagnostics for PID {Pid}", context, pid);
+        }
+    }
+
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern int GetWindowTextLength(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
     #endregion
 }
